@@ -20,3 +20,8 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     user_id: str
     role: UserRole
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str = Field(min_length=8)

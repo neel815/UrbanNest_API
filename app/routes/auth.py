@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from jose import JWTError, jwt
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models.user import User, UserRole
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest
+from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, ResetPasswordRequest
 from app.utils.security import create_access_token, hash_password, verify_password
 
 router = APIRouter()
@@ -75,6 +76,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    if user.must_reset_password:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password setup required. Please use the link sent to your email.",
+        )
 
     access_token = create_access_token(
         {"sub": str(user.id), "role": user.role.value, "email": user.email}
@@ -84,6 +90,31 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
         user_id=str(user.id),
         role=user.role,
     )
+
+
+@router.post("/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict:
+    user = (
+        db.query(User)
+        .filter(
+            User.reset_token == payload.token,
+            User.reset_token_expires_at.is_not(None),
+            User.reset_token_expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user.hashed_password = hash_password(payload.password)
+    user.must_reset_password = False
+    user.reset_token = None
+    user.reset_token_expires_at = None
+    db.commit()
+    return {"message": "Password set successfully"}
 
 
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

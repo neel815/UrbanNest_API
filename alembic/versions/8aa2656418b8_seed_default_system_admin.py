@@ -25,7 +25,7 @@ pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 def upgrade() -> None:
     bind = op.get_bind()
-    system_admin_email = os.getenv("SYSTEM_ADMIN_EMAIL", "systemadmin@urbannest.local")
+    system_admin_email = os.getenv("SYSTEM_ADMIN_EMAIL", "systemadmin@urbannest.com")
     system_admin_name = os.getenv("SYSTEM_ADMIN_FULL_NAME", "System Admin")
     # Change this default via environment variable before production deployment.
     system_admin_password = os.getenv("SYSTEM_ADMIN_PASSWORD", "Admin@123")
@@ -51,7 +51,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    system_admin_email = os.getenv("SYSTEM_ADMIN_EMAIL", "systemadmin@urbannest.local")
+    system_admin_email = os.getenv("SYSTEM_ADMIN_EMAIL", "systemadmin@urbannest.com")
 
     bind.execute(
         sa.text(
