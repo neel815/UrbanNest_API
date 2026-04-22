@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432
     DB_USER: str = "postgres"
-    DB_PASSWORD: str = "postgres"
+    DB_PASSWORD: str = "root@123"
     DB_NAME: str = "urbannest_db"
     
     # API
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     
     @property
     def DATABASE_URL(self) -> str:
-        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        return f"postgresql://postgres:root%40123@127.0.0.1:5432/urbannest_db"
     
     class Config:
         env_file = ".env"
