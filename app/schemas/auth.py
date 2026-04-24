@@ -22,6 +22,13 @@ class AuthResponse(BaseModel):
     role: UserRole
 
 
+class MeResponse(BaseModel):
+    user_id: str
+    full_name: str
+    email: EmailStr
+    role: UserRole
+
+
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str = Field(min_length=8)

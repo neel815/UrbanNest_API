@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models.user import User, UserRole
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, ResetPasswordRequest
+from app.schemas.auth import AuthResponse, LoginRequest, MeResponse, RegisterRequest, ResetPasswordRequest
 from app.utils.security import create_access_token, hash_password, verify_password
 
 router = APIRouter()
@@ -171,4 +171,14 @@ def register(
         access_token=access_token,
         user_id=str(user.id),
         role=user.role,
+    )
+
+
+@router.get("/auth/me", response_model=MeResponse)
+def me(current_user: User = Depends(get_current_user)) -> MeResponse:
+    return MeResponse(
+        user_id=str(current_user.id),
+        full_name=current_user.full_name,
+        email=current_user.email,
+        role=current_user.role,
     )
