@@ -58,6 +58,18 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if not authorization:
+        return None
+    try:
+        return get_current_user(authorization=authorization, db=db)
+    except HTTPException:
+        return None
+
+
 def _can_create_role(creator_role: UserRole, target_role: UserRole) -> bool:
     if target_role == UserRole.SYSTEM_ADMIN:
         return False
@@ -120,10 +132,16 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(
     payload: RegisterRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ) -> AuthResponse:
-    if not _can_create_role(current_user.role, payload.role):
+    if current_user is None:
+        if payload.role != UserRole.RESIDENT:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Public registration is only available for resident accounts",
+            )
+    elif not _can_create_role(current_user.role, payload.role):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not allowed to create this role",
