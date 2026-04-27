@@ -1,0 +1,136 @@
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from fastapi import HTTPException, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.models.user import User, UserRole
+from app.schemas.admin_management import (
+    AdminDashboardStatsResponse,
+    CreateManagedUserRequest,
+    ManagedUserResponse,
+    UpdateManagedUserRequest,
+)
+from app.utils.security import hash_password
+
+
+def require_admin(current_user: User) -> None:
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+
+def get_admin_dashboard_stats(db: Session) -> AdminDashboardStatsResponse:
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    total_residents = (
+        db.query(func.count(User.id)).filter(User.role == UserRole.RESIDENT).scalar() or 0
+    )
+    total_security = (
+        db.query(func.count(User.id)).filter(User.role == UserRole.SECURITY).scalar() or 0
+    )
+    residents_joined_last_30_days = (
+        db.query(func.count(User.id))
+        .filter(User.role == UserRole.RESIDENT, User.created_at >= since)
+        .scalar()
+        or 0
+    )
+    security_joined_last_30_days = (
+        db.query(func.count(User.id))
+        .filter(User.role == UserRole.SECURITY, User.created_at >= since)
+        .scalar()
+        or 0
+    )
+
+    return AdminDashboardStatsResponse(
+        total_residents=total_residents,
+        total_security=total_security,
+        total_managed_users=total_residents + total_security,
+        residents_joined_last_30_days=residents_joined_last_30_days,
+        security_joined_last_30_days=security_joined_last_30_days,
+    )
+
+
+def _serialize_user(user: User) -> ManagedUserResponse:
+    return ManagedUserResponse(
+        id=str(user.id),
+        full_name=user.full_name,
+        email=user.email,
+        role=user.role.value,
+        profile_image_url=user.profile_image_url,
+        created_at=user.created_at.isoformat(),
+    )
+
+
+def list_users_by_role(role: UserRole, db: Session) -> list[ManagedUserResponse]:
+    users = db.query(User).filter(User.role == role).order_by(User.created_at.desc()).all()
+    return [_serialize_user(user) for user in users]
+
+
+def create_user_by_role(
+    payload: CreateManagedUserRequest,
+    role: UserRole,
+    db: Session,
+) -> ManagedUserResponse:
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
+
+    user = User(
+        full_name=payload.full_name,
+        email=payload.email,
+        hashed_password=hash_password(payload.password),
+        profile_image_url=payload.profile_image_url,
+        role=role,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
+
+
+def update_user_by_role(
+    user_id: str,
+    payload: UpdateManagedUserRequest,
+    role: UserRole,
+    db: Session,
+) -> ManagedUserResponse:
+    try:
+        parsed_id = uuid.UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
+
+    user = db.query(User).filter(User.id == parsed_id, User.role == role).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    existing_email_owner = (
+        db.query(User)
+        .filter(User.email == payload.email, User.id != parsed_id)
+        .first()
+    )
+    if existing_email_owner:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
+
+    user.full_name = payload.full_name
+    user.email = payload.email
+    user.profile_image_url = payload.profile_image_url
+    if payload.password:
+        user.hashed_password = hash_password(payload.password)
+
+    db.commit()
+    db.refresh(user)
+    return _serialize_user(user)
+
+
+def delete_user_by_role(user_id: str, role: UserRole, db: Session) -> dict:
+    try:
+        parsed_id = uuid.UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
+
+    user = db.query(User).filter(User.id == parsed_id, User.role == role).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted"}
