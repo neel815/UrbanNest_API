@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta, timezone
+import secrets
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -9,6 +10,8 @@ from app.models.user import User, UserRole
 from app.schemas.admin_management import (
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
+    InviteManagedUserRequest,
+    InviteManagedUserResponse,
     ManagedUserResponse,
     UpdateManagedUserRequest,
 )
@@ -85,6 +88,35 @@ def create_user_by_role(
     db.commit()
     db.refresh(user)
     return _serialize_user(user)
+
+
+def invite_user_by_role(
+    payload: InviteManagedUserRequest,
+    role: UserRole,
+    db: Session,
+) -> InviteManagedUserResponse:
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
+
+    reset_token = secrets.token_urlsafe(32)
+    user = User(
+        full_name=payload.full_name,
+        email=payload.email,
+        hashed_password=hash_password(secrets.token_urlsafe(20)),
+        profile_image_url=payload.profile_image_url,
+        role=role,
+        must_reset_password=True,
+        reset_token=reset_token,
+        reset_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+    db.add(user)
+    db.commit()
+
+    reset_link = f"http://localhost:3000/reset-password?token={reset_token}"
+    return InviteManagedUserResponse(
+        message=f"{role.value.replace('_', ' ').title()} invited successfully",
+        reset_link=reset_link,
+    )
 
 
 def update_user_by_role(

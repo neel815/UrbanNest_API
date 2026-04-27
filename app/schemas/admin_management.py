@@ -9,6 +9,17 @@ class AdminDashboardStatsResponse(BaseModel):
     security_joined_last_30_days: int
 
 
+class InviteManagedUserRequest(BaseModel):
+    full_name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    profile_image_url: str | None = None
+
+
+class InviteManagedUserResponse(BaseModel):
+    message: str
+    reset_link: str
+
+
 class ManagedUserResponse(BaseModel):
     id: str
     full_name: str

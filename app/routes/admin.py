@@ -6,6 +6,8 @@ from app.models.user import User, UserRole
 from app.schemas.admin_management import (
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
+    InviteManagedUserRequest,
+    InviteManagedUserResponse,
     ManagedUserResponse,
     UpdateManagedUserRequest,
 )
@@ -13,6 +15,7 @@ from app.services.admin_user_service import (
     create_user_by_role,
     delete_user_by_role,
     get_admin_dashboard_stats,
+    invite_user_by_role,
     list_users_by_role,
     require_admin,
     update_user_by_role,
@@ -48,6 +51,16 @@ def create_resident(
 ) -> ManagedUserResponse:
     require_admin(current_user)
     return create_user_by_role(payload, UserRole.RESIDENT, db)
+
+
+@router.post("/residents/invite", response_model=InviteManagedUserResponse, status_code=status.HTTP_201_CREATED)
+def invite_resident(
+    payload: InviteManagedUserRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InviteManagedUserResponse:
+    require_admin(current_user)
+    return invite_user_by_role(payload, UserRole.RESIDENT, db)
 
 
 @router.put("/residents/{user_id}", response_model=ManagedUserResponse)
