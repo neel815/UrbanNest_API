@@ -103,6 +103,16 @@ def create_security(
     return create_user_by_role(payload, UserRole.SECURITY, db)
 
 
+@router.post("/security/invite", response_model=InviteManagedUserResponse, status_code=status.HTTP_201_CREATED)
+def invite_security(
+    payload: InviteManagedUserRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> InviteManagedUserResponse:
+    require_admin(current_user)
+    return invite_user_by_role(payload, UserRole.SECURITY, db)
+
+
 @router.put("/security/{user_id}", response_model=ManagedUserResponse)
 def update_security(
     user_id: str,

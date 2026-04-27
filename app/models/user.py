@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -56,3 +56,13 @@ class User(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    resident_profile = relationship("ResidentProfile", back_populates="user", uselist=False)
+    security_profile = relationship("SecurityProfile", back_populates="user", uselist=False)
+    announcements = relationship("Announcement", back_populates="author")
+    maintenance_requests = relationship("MaintenanceRequest", back_populates="resident")
+    visitor_requests = relationship("Visitor", back_populates="resident", foreign_keys="Visitor.resident_id")
+    approved_visits = relationship("Visitor", back_populates="approved_by_user", foreign_keys="Visitor.approved_by")
+    payments = relationship("Payment", back_populates="resident")
+    created_events = relationship("Event", back_populates="creator", foreign_keys="Event.created_by")
+    forum_posts = relationship("ForumPost", back_populates="author", foreign_keys="ForumPost.author_id")

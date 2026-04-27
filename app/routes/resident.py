@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 from itertools import count
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.resident import Announcement as ResidentAnnouncement
 from app.models.user import User, UserRole
 from app.services.auth_service import get_current_user
 
@@ -40,7 +42,7 @@ class DashboardStats(BaseModel):
     total_due: float
 
 class Announcement(BaseModel):
-    id: int
+    id: str
     title: str
     content: str
     date: str
@@ -128,27 +130,23 @@ class ForumPostCreateRequest(BaseModel):
 
 
 def _get_announcements_for_resident(db: Session) -> list[Announcement]:
-    admins = (
-        db.query(User)
-        .filter(User.role.in_([UserRole.ADMIN, UserRole.SYSTEM_ADMIN]))
-        .order_by(User.updated_at.desc())
+    announcements = (
+        db.query(ResidentAnnouncement)
+        .order_by(ResidentAnnouncement.published_at.desc(), ResidentAnnouncement.created_at.desc())
         .limit(5)
         .all()
     )
-    announcements: list[Announcement] = []
-    for index, admin in enumerate(admins, start=1):
-        updated_at = admin.updated_at or admin.created_at
-        announcements.append(
-            Announcement(
-                id=index,
-                title=f"Update from {admin.full_name}",
-                content="A new community update was posted. Check with management for details.",
-                date=updated_at.date().isoformat(),
-                priority="medium",
-                author=admin.full_name,
-            )
+    return [
+        Announcement(
+            id=str(announcement.id),
+            title=announcement.title,
+            content=announcement.content,
+            date=announcement.published_at.date().isoformat(),
+            priority=announcement.priority.value if hasattr(announcement.priority, "value") else str(announcement.priority),
+            author=announcement.author.full_name if announcement.author else "Management Team",
         )
-    return announcements
+        for announcement in announcements
+    ]
 
 # Dashboard endpoints
 @router.get("/dashboard-stats")
