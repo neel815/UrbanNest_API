@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import admin, auth, health, system_admin, resident
+from app.routes import admin, auth, health, system_admin, resident, security
 from app.config import settings
 
 app = FastAPI(
@@ -25,6 +25,7 @@ app.include_router(auth.router, prefix="/api", tags=["Auth"])
 app.include_router(system_admin.router, prefix="/api/system-admin", tags=["System Admin"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(resident.router, prefix="/api/resident", tags=["Resident"])
+app.include_router(security.router, prefix="/api/security", tags=["Security"])
 
 @app.get("/")
 async def root():

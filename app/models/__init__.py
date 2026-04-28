@@ -21,6 +21,19 @@ from app.models.resident import (
     Visitor,
     VisitorStatus,
 )
+from app.models.security import (
+	AccessDirection,
+	AccessLog,
+	AccessPoint,
+	Incident,
+	PatrolRound,
+	PatrolRoute,
+	PatrolStatus,
+	SecurityIncidentCategory,
+	SecurityIncidentSeverity,
+	SecurityIncidentStatus,
+	SecurityReport,
+)
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -33,6 +46,17 @@ __all__ = [
 	"ResidentProfile",
 	"SecurityProfile",
 	"SecurityShift",
+	"AccessDirection",
+	"AccessPoint",
+	"AccessLog",
+	"PatrolRoute",
+	"PatrolRound",
+	"PatrolStatus",
+	"SecurityIncidentCategory",
+	"SecurityIncidentSeverity",
+	"SecurityIncidentStatus",
+	"Incident",
+	"SecurityReport",
 	"Announcement",
 	"AnnouncementPriority",
 	"Event",
