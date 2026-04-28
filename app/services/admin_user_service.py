@@ -59,7 +59,7 @@ def _serialize_user(user: User) -> ManagedUserResponse:
         full_name=user.full_name,
         email=user.email,
         role=user.role.value,
-        profile_image_url=user.profile_image_url,
+        profile_image=user.profile_image,
         created_at=user.created_at.isoformat(),
     )
 
@@ -81,7 +81,7 @@ def create_user_by_role(
         full_name=payload.full_name,
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        profile_image_url=payload.profile_image_url,
+        profile_image=payload.profile_image,
         role=role,
     )
     db.add(user)
@@ -103,7 +103,7 @@ def invite_user_by_role(
         full_name=payload.full_name,
         email=payload.email,
         hashed_password=hash_password(secrets.token_urlsafe(20)),
-        profile_image_url=payload.profile_image_url,
+        profile_image=payload.profile_image,
         role=role,
         must_reset_password=True,
         reset_token=reset_token,
@@ -144,7 +144,7 @@ def update_user_by_role(
 
     user.full_name = payload.full_name
     user.email = payload.email
-    user.profile_image_url = payload.profile_image_url
+    user.profile_image = payload.profile_image
     if payload.password:
         user.hashed_password = hash_password(payload.password)
 

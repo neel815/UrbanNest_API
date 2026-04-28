@@ -27,7 +27,7 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_image: Mapped[str | None] = mapped_column(Text, nullable=True)
     must_reset_password: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )

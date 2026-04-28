@@ -12,7 +12,7 @@ class AdminDashboardStatsResponse(BaseModel):
 class InviteManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
-    profile_image_url: str | None = None
+    profile_image: str | None = None
 
 
 class InviteManagedUserResponse(BaseModel):
@@ -25,7 +25,7 @@ class ManagedUserResponse(BaseModel):
     full_name: str
     email: EmailStr
     role: str
-    profile_image_url: str | None = None
+    profile_image: str | None = None
     created_at: str
 
 
@@ -33,11 +33,11 @@ class CreateManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(min_length=8)
-    profile_image_url: str | None = None
+    profile_image: str | None = None
 
 
 class UpdateManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
-    profile_image_url: str | None = None
+    profile_image: str | None = None
     password: str | None = Field(default=None, min_length=8)

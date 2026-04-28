@@ -16,7 +16,7 @@ class UserSummary(BaseModel):
     role: str
     created_at: str
     must_reset_password: bool
-    profile_image_url: str | None = None
+    profile_image: str | None = None
 
 
 class AdminInviteRequest(BaseModel):
@@ -32,4 +32,4 @@ class AdminInviteResponse(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     app_name: str = Field(min_length=2, max_length=100)
     full_name: str = Field(min_length=2, max_length=100)
-    profile_image_url: str | None = None
+    profile_image: str | None = None

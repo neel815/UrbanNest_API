@@ -182,7 +182,7 @@ def build_me_response(current_user: User) -> MeResponse:
         full_name=current_user.full_name,
         email=current_user.email,
         role=current_user.role,
-        profile_image_url=current_user.profile_image_url,
+        profile_image=current_user.profile_image,
     )
 
 
@@ -192,7 +192,7 @@ def update_current_user_profile(
     db: Session,
 ) -> MeResponse:
     current_user.full_name = payload.full_name
-    current_user.profile_image_url = payload.profile_image_url
+    current_user.profile_image = payload.profile_image
     db.commit()
     db.refresh(current_user)
     return build_me_response(current_user)

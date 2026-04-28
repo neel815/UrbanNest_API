@@ -49,7 +49,7 @@ def list_admins(db: Session) -> list[UserSummary]:
             role=admin.role.value,
             created_at=admin.created_at.isoformat(),
             must_reset_password=admin.must_reset_password,
-            profile_image_url=admin.profile_image_url,
+            profile_image=admin.profile_image,
         )
         for admin in admins
     ]
@@ -81,7 +81,7 @@ def get_settings_me(current_user: User) -> dict:
         "app_name": APP_SETTINGS["app_name"],
         "full_name": current_user.full_name,
         "email": current_user.email,
-        "profile_image_url": current_user.profile_image_url,
+        "profile_image": current_user.profile_image,
     }
 
 
@@ -92,11 +92,11 @@ def update_settings_me(
 ) -> dict:
     APP_SETTINGS["app_name"] = payload.app_name
     current_user.full_name = payload.full_name
-    current_user.profile_image_url = payload.profile_image_url
+    current_user.profile_image = payload.profile_image
     db.commit()
     return {
         "message": "Settings updated",
         "app_name": APP_SETTINGS["app_name"],
         "full_name": current_user.full_name,
-        "profile_image_url": current_user.profile_image_url,
+        "profile_image": current_user.profile_image,
     }

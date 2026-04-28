@@ -27,12 +27,12 @@ class MeResponse(BaseModel):
     full_name: str
     email: EmailStr
     role: UserRole
-    profile_image_url: str | None = None
+    profile_image: str | None = None
 
 
 class UpdateProfileRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
-    profile_image_url: str | None = None
+    profile_image: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):

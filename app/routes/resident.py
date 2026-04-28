@@ -3,7 +3,7 @@ from itertools import count
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -65,6 +65,16 @@ class MaintenanceCreateRequest(BaseModel):
     description: str = Field(min_length=5, max_length=1000)
     category: str = Field(min_length=2, max_length=80)
     priority: str = Field(pattern="^(low|medium|high)$")
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: str) -> str:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def normalize_priority(cls, value: str) -> str:
+        return value.strip().lower() if isinstance(value, str) else value
 
 class Visitor(BaseModel):
     id: int
