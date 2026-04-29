@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 
+from app.models.resident import UnitStatus, UnitType
+
 
 class AdminDashboardStatsResponse(BaseModel):
     total_residents: int
@@ -7,12 +9,14 @@ class AdminDashboardStatsResponse(BaseModel):
     total_managed_users: int
     residents_joined_last_30_days: int
     security_joined_last_30_days: int
+    building_name: str | None = None
 
 
 class InviteManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
     profile_image: str | None = None
+    unit_id: str | None = None
 
 
 class InviteManagedUserResponse(BaseModel):
@@ -34,6 +38,7 @@ class CreateManagedUserRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     profile_image: str | None = None
+    unit_id: str | None = None
 
 
 class UpdateManagedUserRequest(BaseModel):
@@ -41,3 +46,26 @@ class UpdateManagedUserRequest(BaseModel):
     email: EmailStr
     profile_image: str | None = None
     password: str | None = Field(default=None, min_length=8)
+
+
+class UnitResponse(BaseModel):
+    id: str
+    building_id: str
+    unit_number: str
+    floor: int | None
+    type: UnitType
+    status: UnitStatus
+    resident_name: str | None = None
+
+
+class UnitCreateRequest(BaseModel):
+    unit_number: str = Field(min_length=1, max_length=50)
+    floor: int | None = Field(default=None, ge=-10, le=200)
+    type: UnitType
+
+
+class UnitUpdateRequest(BaseModel):
+    unit_number: str | None = Field(default=None, min_length=1, max_length=50)
+    floor: int | None = Field(default=None, ge=-10, le=200)
+    type: UnitType | None = None
+    status: UnitStatus | None = None

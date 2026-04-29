@@ -21,6 +21,14 @@ class UnitStatus(str, enum.Enum):
     MAINTENANCE = "maintenance"
 
 
+class UnitType(str, enum.Enum):
+    STUDIO = "studio"
+    ONE_BHK = "1BHK"
+    TWO_BHK = "2BHK"
+    THREE_BHK = "3BHK"
+    PENTHOUSE = "penthouse"
+
+
 class AnnouncementPriority(str, enum.Enum):
     LOW = "low"
     MEDIUM = "medium"
@@ -137,6 +145,17 @@ class Unit(Base):
     )
     unit_number: Mapped[str] = mapped_column(String(50), nullable=False)
     floor_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unit_type: Mapped[UnitType] = mapped_column(
+        Enum(
+            UnitType,
+            name="unit_type",
+            native_enum=False,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=UnitType.STUDIO,
+        server_default=UnitType.STUDIO.value,
+    )
     size_sqft: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[UnitStatus] = mapped_column(
         Enum(

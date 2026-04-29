@@ -7,6 +7,9 @@ from app.models.user import User, UserRole
 from app.schemas.admin_management import (
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
+    UnitCreateRequest,
+    UnitResponse,
+    UnitUpdateRequest,
     InviteManagedUserRequest,
     InviteManagedUserResponse,
     ManagedUserResponse,
@@ -14,12 +17,16 @@ from app.schemas.admin_management import (
 )
 from app.services.admin_user_service import (
     create_user_by_role,
+    create_unit_for_building,
     delete_user_by_role,
+    delete_unit_for_building,
     get_admin_dashboard_stats,
     invite_user_by_role,
     list_users_by_role,
+    list_units_for_building,
     require_admin,
     update_user_by_role,
+    update_unit_for_building,
 )
 from app.services.auth_service import get_current_user
 
@@ -29,9 +36,9 @@ router = APIRouter()
 def _get_admin_building_id(current_user: User, db: Session):
     admin_profile = db.query(AdminProfile).filter(AdminProfile.user_id == current_user.id).first()
     if not admin_profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin profile not found")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin not assigned to any building")
     if admin_profile.building_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin building not assigned")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin not assigned to any building")
     return admin_profile.building_id
 
 
@@ -62,7 +69,8 @@ def create_resident(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    return create_user_by_role(payload, UserRole.RESIDENT, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return create_user_by_role(payload, UserRole.RESIDENT, db, building_id)
 
 
 @router.post("/residents/invite", response_model=InviteManagedUserResponse, status_code=status.HTTP_201_CREATED)
@@ -72,7 +80,52 @@ def invite_resident(
     db: Session = Depends(get_db),
 ) -> InviteManagedUserResponse:
     require_admin(current_user)
-    return invite_user_by_role(payload, UserRole.RESIDENT, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return invite_user_by_role(payload, UserRole.RESIDENT, db, building_id)
+
+
+@router.get("/units", response_model=list[UnitResponse])
+def list_units(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[UnitResponse]:
+    require_admin(current_user)
+    building_id = _get_admin_building_id(current_user, db)
+    return list_units_for_building(db, building_id)
+
+
+@router.post("/units", response_model=UnitResponse, status_code=status.HTTP_201_CREATED)
+def create_unit(
+    payload: UnitCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UnitResponse:
+    require_admin(current_user)
+    building_id = _get_admin_building_id(current_user, db)
+    return create_unit_for_building(db, building_id, payload)
+
+
+@router.patch("/units/{unit_id}", response_model=UnitResponse)
+def update_unit(
+    unit_id: str,
+    payload: UnitUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UnitResponse:
+    require_admin(current_user)
+    building_id = _get_admin_building_id(current_user, db)
+    return update_unit_for_building(db, building_id, unit_id, payload)
+
+
+@router.delete("/units/{unit_id}")
+def delete_unit(
+    unit_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin(current_user)
+    building_id = _get_admin_building_id(current_user, db)
+    return delete_unit_for_building(db, building_id, unit_id)
 
 
 @router.put("/residents/{user_id}", response_model=ManagedUserResponse)
@@ -115,7 +168,8 @@ def create_security(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    return create_user_by_role(payload, UserRole.SECURITY, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return create_user_by_role(payload, UserRole.SECURITY, db, building_id)
 
 
 @router.post("/security/invite", response_model=InviteManagedUserResponse, status_code=status.HTTP_201_CREATED)
@@ -125,7 +179,8 @@ def invite_security(
     db: Session = Depends(get_db),
 ) -> InviteManagedUserResponse:
     require_admin(current_user)
-    return invite_user_by_role(payload, UserRole.SECURITY, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return invite_user_by_role(payload, UserRole.SECURITY, db, building_id)
 
 
 @router.put("/security/{user_id}", response_model=ManagedUserResponse)

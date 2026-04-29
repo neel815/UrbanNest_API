@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.models.resident import ResidentProfile
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     AuthResponse,
@@ -163,6 +164,11 @@ def register_user(
         role=payload.role,
     )
     db.add(user)
+    db.flush()
+
+    if payload.role == UserRole.RESIDENT:
+        db.add(ResidentProfile(user_id=user.id))
+
     db.commit()
     db.refresh(user)
 
