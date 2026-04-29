@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.resident import ResidentProfile, SecurityProfile, Unit
 from app.models.user import User, UserRole
 from app.schemas.admin_management import (
     AdminDashboardStatsResponse,
@@ -23,26 +24,37 @@ def require_admin(current_user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
 
-def get_admin_dashboard_stats(db: Session) -> AdminDashboardStatsResponse:
+def get_admin_dashboard_stats(db: Session, building_id: uuid.UUID | None = None) -> AdminDashboardStatsResponse:
     since = datetime.now(timezone.utc) - timedelta(days=30)
-    total_residents = (
-        db.query(func.count(User.id)).filter(User.role == UserRole.RESIDENT).scalar() or 0
+    resident_query = db.query(func.count(User.id)).filter(User.role == UserRole.RESIDENT)
+    security_query = db.query(func.count(User.id)).filter(User.role == UserRole.SECURITY)
+    resident_recent_query = db.query(func.count(User.id)).filter(
+        User.role == UserRole.RESIDENT,
+        User.created_at >= since,
     )
-    total_security = (
-        db.query(func.count(User.id)).filter(User.role == UserRole.SECURITY).scalar() or 0
+    security_recent_query = db.query(func.count(User.id)).filter(
+        User.role == UserRole.SECURITY,
+        User.created_at >= since,
     )
-    residents_joined_last_30_days = (
-        db.query(func.count(User.id))
-        .filter(User.role == UserRole.RESIDENT, User.created_at >= since)
-        .scalar()
-        or 0
-    )
-    security_joined_last_30_days = (
-        db.query(func.count(User.id))
-        .filter(User.role == UserRole.SECURITY, User.created_at >= since)
-        .scalar()
-        or 0
-    )
+
+    if building_id is not None:
+        resident_query = resident_query.join(ResidentProfile, ResidentProfile.user_id == User.id).join(
+            Unit, Unit.id == ResidentProfile.unit_id
+        ).filter(Unit.building_id == building_id)
+        security_query = security_query.join(SecurityProfile, SecurityProfile.user_id == User.id).filter(
+            SecurityProfile.assigned_building_id == building_id
+        )
+        resident_recent_query = resident_recent_query.join(ResidentProfile, ResidentProfile.user_id == User.id).join(
+            Unit, Unit.id == ResidentProfile.unit_id
+        ).filter(Unit.building_id == building_id)
+        security_recent_query = security_recent_query.join(SecurityProfile, SecurityProfile.user_id == User.id).filter(
+            SecurityProfile.assigned_building_id == building_id
+        )
+
+    total_residents = resident_query.scalar() or 0
+    total_security = security_query.scalar() or 0
+    residents_joined_last_30_days = resident_recent_query.scalar() or 0
+    security_joined_last_30_days = security_recent_query.scalar() or 0
 
     return AdminDashboardStatsResponse(
         total_residents=total_residents,
@@ -64,8 +76,18 @@ def _serialize_user(user: User) -> ManagedUserResponse:
     )
 
 
-def list_users_by_role(role: UserRole, db: Session) -> list[ManagedUserResponse]:
-    users = db.query(User).filter(User.role == role).order_by(User.created_at.desc()).all()
+def list_users_by_role(role: UserRole, db: Session, building_id: uuid.UUID | None = None) -> list[ManagedUserResponse]:
+    query = db.query(User).filter(User.role == role)
+    if building_id is not None:
+        if role == UserRole.RESIDENT:
+            query = query.join(ResidentProfile, ResidentProfile.user_id == User.id).join(
+                Unit, Unit.id == ResidentProfile.unit_id
+            ).filter(Unit.building_id == building_id)
+        elif role == UserRole.SECURITY:
+            query = query.join(SecurityProfile, SecurityProfile.user_id == User.id).filter(
+                SecurityProfile.assigned_building_id == building_id
+            )
+    users = query.order_by(User.created_at.desc()).all()
     return [_serialize_user(user) for user in users]
 
 
@@ -124,13 +146,24 @@ def update_user_by_role(
     payload: UpdateManagedUserRequest,
     role: UserRole,
     db: Session,
+    building_id: uuid.UUID | None = None,
 ) -> ManagedUserResponse:
     try:
         parsed_id = uuid.UUID(user_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
 
-    user = db.query(User).filter(User.id == parsed_id, User.role == role).first()
+    user_query = db.query(User).filter(User.id == parsed_id, User.role == role)
+    if building_id is not None:
+        if role == UserRole.RESIDENT:
+            user_query = user_query.join(ResidentProfile, ResidentProfile.user_id == User.id).join(
+                Unit, Unit.id == ResidentProfile.unit_id
+            ).filter(Unit.building_id == building_id)
+        elif role == UserRole.SECURITY:
+            user_query = user_query.join(SecurityProfile, SecurityProfile.user_id == User.id).filter(
+                SecurityProfile.assigned_building_id == building_id
+            )
+    user = user_query.first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -153,13 +186,23 @@ def update_user_by_role(
     return _serialize_user(user)
 
 
-def delete_user_by_role(user_id: str, role: UserRole, db: Session) -> dict:
+def delete_user_by_role(user_id: str, role: UserRole, db: Session, building_id: uuid.UUID | None = None) -> dict:
     try:
         parsed_id = uuid.UUID(user_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user id") from exc
 
-    user = db.query(User).filter(User.id == parsed_id, User.role == role).first()
+    user_query = db.query(User).filter(User.id == parsed_id, User.role == role)
+    if building_id is not None:
+        if role == UserRole.RESIDENT:
+            user_query = user_query.join(ResidentProfile, ResidentProfile.user_id == User.id).join(
+                Unit, Unit.id == ResidentProfile.unit_id
+            ).filter(Unit.building_id == building_id)
+        elif role == UserRole.SECURITY:
+            user_query = user_query.join(SecurityProfile, SecurityProfile.user_id == User.id).filter(
+                SecurityProfile.assigned_building_id == building_id
+            )
+    user = user_query.first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 

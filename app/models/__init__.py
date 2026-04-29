@@ -21,6 +21,7 @@ from app.models.resident import (
     Visitor,
     VisitorStatus,
 )
+from app.models.admin import AdminProfile
 from app.models.security import (
 	AccessDirection,
 	AccessLog,
@@ -39,6 +40,7 @@ from app.models.user import User, UserRole
 __all__ = [
 	"User",
 	"UserRole",
+	"AdminProfile",
 	"Building",
 	"BuildingStatus",
 	"Unit",

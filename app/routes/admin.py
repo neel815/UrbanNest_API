@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.admin import AdminProfile
 from app.models.user import User, UserRole
 from app.schemas.admin_management import (
     AdminDashboardStatsResponse,
@@ -25,13 +26,23 @@ from app.services.auth_service import get_current_user
 router = APIRouter()
 
 
+def _get_admin_building_id(current_user: User, db: Session):
+    admin_profile = db.query(AdminProfile).filter(AdminProfile.user_id == current_user.id).first()
+    if not admin_profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin profile not found")
+    if admin_profile.building_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin building not assigned")
+    return admin_profile.building_id
+
+
 @router.get("/dashboard/stats", response_model=AdminDashboardStatsResponse)
 def dashboard_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AdminDashboardStatsResponse:
     require_admin(current_user)
-    return get_admin_dashboard_stats(db)
+    building_id = _get_admin_building_id(current_user, db)
+    return get_admin_dashboard_stats(db, building_id)
 
 
 @router.get("/residents", response_model=list[ManagedUserResponse])
@@ -40,7 +51,8 @@ def list_residents(
     db: Session = Depends(get_db),
 ) -> list[ManagedUserResponse]:
     require_admin(current_user)
-    return list_users_by_role(UserRole.RESIDENT, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return list_users_by_role(UserRole.RESIDENT, db, building_id)
 
 
 @router.post("/residents", response_model=ManagedUserResponse, status_code=status.HTTP_201_CREATED)
@@ -71,7 +83,8 @@ def update_resident(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    return update_user_by_role(user_id, payload, UserRole.RESIDENT, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return update_user_by_role(user_id, payload, UserRole.RESIDENT, db, building_id)
 
 
 @router.delete("/residents/{user_id}")
@@ -81,7 +94,8 @@ def delete_resident(
     db: Session = Depends(get_db),
 ) -> dict:
     require_admin(current_user)
-    return delete_user_by_role(user_id, UserRole.RESIDENT, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return delete_user_by_role(user_id, UserRole.RESIDENT, db, building_id)
 
 
 @router.get("/security", response_model=list[ManagedUserResponse])
@@ -90,7 +104,8 @@ def list_security(
     db: Session = Depends(get_db),
 ) -> list[ManagedUserResponse]:
     require_admin(current_user)
-    return list_users_by_role(UserRole.SECURITY, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return list_users_by_role(UserRole.SECURITY, db, building_id)
 
 
 @router.post("/security", response_model=ManagedUserResponse, status_code=status.HTTP_201_CREATED)
@@ -121,7 +136,8 @@ def update_security(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    return update_user_by_role(user_id, payload, UserRole.SECURITY, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return update_user_by_role(user_id, payload, UserRole.SECURITY, db, building_id)
 
 
 @router.delete("/security/{user_id}")
@@ -131,4 +147,5 @@ def delete_security(
     db: Session = Depends(get_db),
 ) -> dict:
     require_admin(current_user)
-    return delete_user_by_role(user_id, UserRole.SECURITY, db)
+    building_id = _get_admin_building_id(current_user, db)
+    return delete_user_by_role(user_id, UserRole.SECURITY, db, building_id)
