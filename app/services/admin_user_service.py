@@ -6,9 +6,10 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.resident import Building, ResidentProfile, SecurityProfile, Unit, UnitStatus
+from app.models.resident import Building, BuildingType, ResidentProfile, SecurityProfile, Unit, UnitStatus
 from app.models.user import User, UserRole
 from app.schemas.admin_management import (
+    AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
     UnitCreateRequest,
@@ -57,6 +58,7 @@ def get_admin_dashboard_stats(db: Session, building_id: uuid.UUID | None = None)
         total_managed_users=total_residents + total_security,
         residents_joined_last_30_days=residents_joined_last_30_days,
         security_joined_last_30_days=security_joined_last_30_days,
+        building_id=str(building_id) if building_id is not None else None,
         building_name=(
             db.query(Building.name).filter(Building.id == building_id).scalar() if building_id is not None else None
         ),
@@ -79,10 +81,21 @@ def _serialize_unit(unit: Unit, resident_name: str | None = None) -> UnitRespons
         id=str(unit.id),
         building_id=str(unit.building_id),
         unit_number=unit.unit_number,
-        floor=unit.floor_number,
-        type=unit.unit_type,
+        floor=unit.floor,
+        plot_number=unit.plot_number,
         status=unit.status,
         resident_name=resident_name,
+    )
+
+
+def get_admin_building_info(db: Session, building_id: uuid.UUID) -> AdminBuildingInfoResponse:
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Building not found")
+    return AdminBuildingInfoResponse(
+        building_id=str(building.id),
+        building_name=building.name,
+        building_type=building.building_type,
     )
 
 
@@ -92,13 +105,17 @@ def list_units_for_building(db: Session, building_id: uuid.UUID) -> list[UnitRes
         .outerjoin(ResidentProfile, ResidentProfile.unit_id == Unit.id)
         .outerjoin(User, User.id == ResidentProfile.user_id)
         .filter(Unit.building_id == building_id)
-        .order_by(Unit.floor_number.asc().nullslast(), Unit.unit_number.asc())
+        .order_by(Unit.floor.asc().nullslast(), Unit.unit_number.asc())
         .all()
     )
     return [_serialize_unit(unit, resident_name) for unit, resident_name in rows]
 
 
 def create_unit_for_building(db: Session, building_id: uuid.UUID, payload: UnitCreateRequest) -> UnitResponse:
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Building not found")
+
     existing_unit = (
         db.query(Unit)
         .filter(Unit.building_id == building_id, Unit.unit_number == payload.unit_number)
@@ -107,11 +124,14 @@ def create_unit_for_building(db: Session, building_id: uuid.UUID, payload: UnitC
     if existing_unit:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit number already exists in this building")
 
+    floor, plot_number = _normalize_unit_location(building.building_type, payload.floor, payload.plot_number)
+
     unit = Unit(
         building_id=building_id,
         unit_number=payload.unit_number,
-        floor_number=payload.floor,
-        unit_type=payload.type,
+        floor=floor,
+        plot_number=plot_number,
+        status=payload.status,
     )
     db.add(unit)
     db.commit()
@@ -138,6 +158,10 @@ def update_unit_for_building(
     if not unit:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found")
 
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Building not found")
+
     if payload.unit_number and payload.unit_number != unit.unit_number:
         existing_unit = (
             db.query(Unit)
@@ -148,10 +172,11 @@ def update_unit_for_building(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit number already exists in this building")
         unit.unit_number = payload.unit_number
 
-    if payload.floor is not None:
-        unit.floor_number = payload.floor
-    if payload.type is not None:
-        unit.unit_type = payload.type
+    floor = payload.floor if payload.floor is not None else unit.floor
+    plot_number = payload.plot_number if payload.plot_number is not None else unit.plot_number
+    floor, plot_number = _normalize_unit_location(building.building_type, floor, plot_number)
+    unit.floor = floor
+    unit.plot_number = plot_number
     if payload.status is not None:
         unit.status = payload.status
 
@@ -182,8 +207,8 @@ def delete_unit_for_building(db: Session, building_id: uuid.UUID, unit_id: str) 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found")
 
     resident_exists = db.query(ResidentProfile).filter(ResidentProfile.unit_id == unit.id).first()
-    if resident_exists:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit has an assigned resident")
+    if unit.status == UnitStatus.OCCUPIED or resident_exists:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit is occupied")
 
     db.delete(unit)
     db.commit()
@@ -245,7 +270,7 @@ def create_user_by_role(
         )
         if not unit:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found in your building")
-        if unit.status != UnitStatus.AVAILABLE:
+        if unit.status != UnitStatus.VACANT:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit is not vacant")
 
         db.add(ResidentProfile(user_id=user.id, unit_id=unit.id))
@@ -298,7 +323,7 @@ def invite_user_by_role(
         )
         if not unit:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unit not found in your building")
-        if unit.status != UnitStatus.AVAILABLE:
+        if unit.status != UnitStatus.VACANT:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit is not vacant")
 
         db.add(ResidentProfile(user_id=user.id, unit_id=unit.id))
@@ -405,8 +430,21 @@ def delete_user_by_role(user_id: str, role: UserRole, db: Session, building_id: 
         if resident_profile and resident_profile.unit_id is not None:
             unit = db.query(Unit).filter(Unit.id == resident_profile.unit_id).first()
             if unit:
-                unit.status = UnitStatus.AVAILABLE
+                unit.status = UnitStatus.VACANT
 
     db.delete(user)
     db.commit()
     return {"message": "User deleted"}
+
+
+def _normalize_unit_location(building_type: BuildingType, floor: int | None, plot_number: str | None) -> tuple[int | None, str | None]:
+    if building_type == BuildingType.APARTMENT_TOWER:
+        if floor is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="floor is required for apartment towers")
+        return floor, None
+
+    if floor is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="floor must be null for this building type")
+    if not plot_number:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plot_number is required for this building type")
+    return None, plot_number

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.resident import UnitStatus, UnitType
+from app.models.resident import BuildingType, UnitStatus
 
 
 class AdminDashboardStatsResponse(BaseModel):
@@ -9,7 +9,14 @@ class AdminDashboardStatsResponse(BaseModel):
     total_managed_users: int
     residents_joined_last_30_days: int
     security_joined_last_30_days: int
+    building_id: str | None = None
     building_name: str | None = None
+
+
+class AdminBuildingInfoResponse(BaseModel):
+    building_id: str
+    building_name: str
+    building_type: BuildingType
 
 
 class InviteManagedUserRequest(BaseModel):
@@ -53,7 +60,7 @@ class UnitResponse(BaseModel):
     building_id: str
     unit_number: str
     floor: int | None
-    type: UnitType
+    plot_number: str | None
     status: UnitStatus
     resident_name: str | None = None
 
@@ -61,11 +68,12 @@ class UnitResponse(BaseModel):
 class UnitCreateRequest(BaseModel):
     unit_number: str = Field(min_length=1, max_length=50)
     floor: int | None = Field(default=None, ge=-10, le=200)
-    type: UnitType
+    plot_number: str | None = Field(default=None, max_length=50)
+    status: UnitStatus = UnitStatus.VACANT
 
 
 class UnitUpdateRequest(BaseModel):
     unit_number: str | None = Field(default=None, min_length=1, max_length=50)
     floor: int | None = Field(default=None, ge=-10, le=200)
-    type: UnitType | None = None
+    plot_number: str | None = Field(default=None, max_length=50)
     status: UnitStatus | None = None

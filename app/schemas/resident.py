@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.resident import (
     AnnouncementPriority,
     BuildingStatus,
+    BuildingType,
     ForumPostCategory,
     MaintenanceCategory,
     MaintenancePriority,
@@ -26,6 +27,7 @@ class BuildingCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=150)
     address: str = Field(min_length=5, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
+    building_type: BuildingType = BuildingType.APARTMENT_TOWER
     status: BuildingStatus = BuildingStatus.ACTIVE
 
 
@@ -33,6 +35,7 @@ class BuildingUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=150)
     address: str | None = Field(default=None, min_length=5, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
+    building_type: BuildingType | None = None
     status: BuildingStatus | None = None
 
 
@@ -43,6 +46,7 @@ class BuildingResponse(BaseModel):
     name: str
     address: str
     description: str | None
+    building_type: BuildingType
     status: BuildingStatus
     created_at: datetime
     updated_at: datetime
@@ -51,16 +55,16 @@ class BuildingResponse(BaseModel):
 class UnitCreateRequest(BaseModel):
     building_id: UUID
     unit_number: str = Field(min_length=1, max_length=50)
-    floor_number: int | None = Field(default=None, ge=-10, le=200)
-    size_sqft: int | None = Field(default=None, ge=0)
-    status: UnitStatus = UnitStatus.AVAILABLE
+    floor: int | None = Field(default=None, ge=-10, le=200)
+    plot_number: str | None = Field(default=None, max_length=50)
+    status: UnitStatus = UnitStatus.VACANT
 
 
 class UnitUpdateRequest(BaseModel):
     building_id: UUID | None = None
     unit_number: str | None = Field(default=None, min_length=1, max_length=50)
-    floor_number: int | None = Field(default=None, ge=-10, le=200)
-    size_sqft: int | None = Field(default=None, ge=0)
+    floor: int | None = Field(default=None, ge=-10, le=200)
+    plot_number: str | None = Field(default=None, max_length=50)
     status: UnitStatus | None = None
 
 
@@ -70,8 +74,8 @@ class UnitResponse(BaseModel):
     id: UUID
     building_id: UUID
     unit_number: str
-    floor_number: int | None
-    size_sqft: int | None
+    floor: int | None
+    plot_number: str | None
     status: UnitStatus
     created_at: datetime
     updated_at: datetime

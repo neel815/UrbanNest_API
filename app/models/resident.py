@@ -15,18 +15,17 @@ class BuildingStatus(str, enum.Enum):
     INACTIVE = "inactive"
 
 
+class BuildingType(str, enum.Enum):
+    APARTMENT_TOWER = "apartment_tower"
+    ROW_HOUSE_TENEMENT = "row_house_tenement"
+    BUNGALOW = "bungalow"
+    VILLA = "villa"
+
+
 class UnitStatus(str, enum.Enum):
-    AVAILABLE = "available"
+    VACANT = "vacant"
     OCCUPIED = "occupied"
     MAINTENANCE = "maintenance"
-
-
-class UnitType(str, enum.Enum):
-    STUDIO = "studio"
-    ONE_BHK = "1BHK"
-    TWO_BHK = "2BHK"
-    THREE_BHK = "3BHK"
-    PENTHOUSE = "penthouse"
 
 
 class AnnouncementPriority(str, enum.Enum):
@@ -104,6 +103,17 @@ class Building(Base):
     name: Mapped[str] = mapped_column(String(150), nullable=False, unique=True, index=True)
     address: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    building_type: Mapped[BuildingType] = mapped_column(
+        Enum(
+            BuildingType,
+            name="building_type",
+            native_enum=False,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=BuildingType.APARTMENT_TOWER,
+        server_default=BuildingType.APARTMENT_TOWER.value,
+    )
     status: Mapped[BuildingStatus] = mapped_column(
         Enum(
             BuildingStatus,
@@ -144,19 +154,8 @@ class Unit(Base):
         index=True,
     )
     unit_number: Mapped[str] = mapped_column(String(50), nullable=False)
-    floor_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    unit_type: Mapped[UnitType] = mapped_column(
-        Enum(
-            UnitType,
-            name="unit_type",
-            native_enum=False,
-            values_callable=lambda enum_cls: [member.value for member in enum_cls],
-        ),
-        nullable=False,
-        default=UnitType.STUDIO,
-        server_default=UnitType.STUDIO.value,
-    )
-    size_sqft: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    floor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    plot_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[UnitStatus] = mapped_column(
         Enum(
             UnitStatus,
@@ -165,8 +164,8 @@ class Unit(Base):
             values_callable=lambda enum_cls: [member.value for member in enum_cls],
         ),
         nullable=False,
-        default=UnitStatus.AVAILABLE,
-        server_default=UnitStatus.AVAILABLE.value,
+        default=UnitStatus.VACANT,
+        server_default=UnitStatus.VACANT.value,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

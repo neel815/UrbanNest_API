@@ -44,7 +44,7 @@ class BuildingCreateRequest(BaseModel):
     address: str = Field(min_length=5, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
     building_type: BuildingType = BuildingType.APARTMENT_TOWER
-    status: BuildingStatus = BuildingStatus.ACTIVE
+    status: BuildingStatus | None = None
 
 
 class BuildingUpdateRequest(BaseModel):

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.resident import Building, ResidentProfile, Unit
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
-from app.schemas.admin import (
+from app.schemas.system_admin import (
     AdminInviteRequest,
     AdminInviteResponse,
     BuildingCreateRequest,
@@ -61,7 +61,7 @@ def _relative_time(value: datetime) -> str:
 
 def _initials(name: str) -> str:
     parts = [part for part in name.split(' ') if part]
-    return ''.join(part[0].upper() for part in parts[:2]) or 'SA'
+    return ''.join(part[0].upper() for part in parts[:2])
 
 
 def get_platform_activity(db: Session) -> list[PlatformActivityItem]:
@@ -242,6 +242,7 @@ def update_settings_me(
         "full_name": current_user.full_name,
         "profile_image": current_user.profile_image,
     }
+
 def create_building(payload: BuildingCreateRequest, db: Session) -> BuildingResponse:
     """Create a new building"""
     if db.query(Building).filter(Building.name == payload.name).first():
@@ -251,6 +252,7 @@ def create_building(payload: BuildingCreateRequest, db: Session) -> BuildingResp
         name=payload.name,
         address=payload.address,
         description=payload.description,
+        building_type=payload.building_type,
         status=payload.status,
     )
     db.add(building)
@@ -299,6 +301,8 @@ def update_building(building_id: str, payload: BuildingUpdateRequest, db: Sessio
         building.address = payload.address
     if payload.description is not None:
         building.description = payload.description
+    if payload.building_type is not None:
+        building.building_type = payload.building_type
     if payload.status:
         building.status = payload.status
 

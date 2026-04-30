@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.admin import AdminProfile
 from app.models.user import User, UserRole
 from app.schemas.admin_management import (
+    AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
     UnitCreateRequest,
@@ -21,6 +22,7 @@ from app.services.admin_user_service import (
     delete_user_by_role,
     delete_unit_for_building,
     get_admin_dashboard_stats,
+    get_admin_building_info,
     invite_user_by_role,
     list_users_by_role,
     list_units_for_building,
@@ -50,6 +52,16 @@ def dashboard_stats(
     require_admin(current_user)
     building_id = _get_admin_building_id(current_user, db)
     return get_admin_dashboard_stats(db, building_id)
+
+
+@router.get("/building-info", response_model=AdminBuildingInfoResponse)
+def building_info(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AdminBuildingInfoResponse:
+    require_admin(current_user)
+    building_id = _get_admin_building_id(current_user, db)
+    return get_admin_building_info(db, building_id)
 
 
 @router.get("/residents", response_model=list[ManagedUserResponse])

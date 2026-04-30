@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.routes.auth import get_current_user
-from app.schemas.admin import (
+from app.schemas.system_admin import (
     AdminInviteRequest,
     AdminInviteResponse,
     BuildingCreateRequest,
