@@ -1,29 +1,31 @@
-from app.models.resident import (
-    Announcement,
-    AnnouncementPriority,
-    Building,
+from app.models.admin import (
+	AdminProfile,
+	Announcement,
+	AnnouncementPriority,
+	Building,
+	BuildingStatus,
 	BuildingType,
-    BuildingStatus,
+	Unit,
+	UnitStatus,
+)
+from app.models.resident import (
 	Event,
 	ForumPost,
 	ForumPostCategory,
-    MaintenanceCategory,
-    MaintenancePriority,
-    MaintenanceRequest,
-    MaintenanceStatus,
-    Payment,
-    PaymentStatus,
-    PaymentType,
-    ResidentProfile,
+	MaintenanceCategory,
+	MaintenancePriority,
+	MaintenanceRequest,
+	MaintenanceStatus,
+	Payment,
+	PaymentStatus,
+	PaymentType,
+	ResidentProfile,
+	Visitor,
+	VisitorStatus,
+)
+from app.models.security import (
 	SecurityProfile,
 	SecurityShift,
-    Unit,
-    UnitStatus,
-    Visitor,
-    VisitorStatus,
-)
-from app.models.admin import AdminProfile
-from app.models.security import (
 	AccessDirection,
 	AccessLog,
 	AccessPoint,

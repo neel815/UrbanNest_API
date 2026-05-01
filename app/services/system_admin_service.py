@@ -5,7 +5,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
-from app.models.resident import Building, ResidentProfile, Unit
+from app.models.admin import Building, Unit
+from app.models.resident import ResidentProfile
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
 from app.schemas.system_admin import (

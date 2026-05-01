@@ -20,6 +20,13 @@ class PatrolStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class SecurityShift(str, enum.Enum):
+    MORNING = "morning"
+    EVENING = "evening"
+    NIGHT = "night"
+    ROTATING = "rotating"
+
+
 class SecurityIncidentCategory(str, enum.Enum):
     SECURITY = "security"
     SAFETY = "safety"
@@ -40,6 +47,54 @@ class SecurityIncidentStatus(str, enum.Enum):
     INVESTIGATING = "investigating"
     RESOLVED = "resolved"
     CLOSED = "closed"
+
+
+class SecurityProfile(Base):
+    __tablename__ = "security_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    badge_number: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    shift: Mapped[SecurityShift] = mapped_column(
+        Enum(
+            SecurityShift,
+            name="security_shift",
+            native_enum=False,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=SecurityShift.ROTATING,
+        server_default=SecurityShift.ROTATING.value,
+    )
+    assigned_building_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("buildings.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    user = relationship("User", back_populates="security_profile")
+    assigned_building = relationship("Building", back_populates="security_profiles")
 
 
 class AccessPoint(Base):

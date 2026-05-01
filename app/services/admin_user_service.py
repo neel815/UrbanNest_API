@@ -6,9 +6,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.resident import Building, BuildingType, ResidentProfile, SecurityProfile, Unit, UnitStatus
+from app.models.admin import Building, BuildingType, Unit, UnitStatus
+from app.models.resident import ResidentProfile
+from app.models.security import SecurityProfile
 from app.models.user import User, UserRole
-from app.schemas.admin_management import (
+from app.models.admin import AdminProfile
+from app.schemas.admin import (
     AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
@@ -26,6 +29,15 @@ from app.utils.security import hash_password
 def require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+
+def get_admin_building_id(db: Session, user_id: uuid.UUID) -> uuid.UUID:
+    admin_profile = db.query(AdminProfile).filter(AdminProfile.user_id == user_id).first()
+    if not admin_profile:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin not assigned to any building")
+    if admin_profile.building_id is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin not assigned to any building")
+    return admin_profile.building_id
 
 
 def get_admin_dashboard_stats(db: Session, building_id: uuid.UUID | None = None) -> AdminDashboardStatsResponse:

@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models.resident import BuildingStatus, BuildingType
+from app.models.admin import BuildingStatus, BuildingType
 
 
 class DashboardStatsResponse(BaseModel):

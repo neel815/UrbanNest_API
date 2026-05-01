@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.admin import AdminProfile
 from app.models.user import User, UserRole
-from app.schemas.admin_management import (
+from app.schemas.admin import (
     AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
@@ -23,6 +22,7 @@ from app.services.admin_user_service import (
     delete_unit_for_building,
     get_admin_dashboard_stats,
     get_admin_building_info,
+    get_admin_building_id,
     invite_user_by_role,
     list_users_by_role,
     list_units_for_building,
@@ -35,22 +35,13 @@ from app.services.auth_service import get_current_user
 router = APIRouter()
 
 
-def _get_admin_building_id(current_user: User, db: Session):
-    admin_profile = db.query(AdminProfile).filter(AdminProfile.user_id == current_user.id).first()
-    if not admin_profile:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin not assigned to any building")
-    if admin_profile.building_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin not assigned to any building")
-    return admin_profile.building_id
-
-
 @router.get("/dashboard/stats", response_model=AdminDashboardStatsResponse)
 def dashboard_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AdminDashboardStatsResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return get_admin_dashboard_stats(db, building_id)
 
 
@@ -60,7 +51,7 @@ def building_info(
     db: Session = Depends(get_db),
 ) -> AdminBuildingInfoResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return get_admin_building_info(db, building_id)
 
 
@@ -70,7 +61,7 @@ def list_residents(
     db: Session = Depends(get_db),
 ) -> list[ManagedUserResponse]:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return list_users_by_role(UserRole.RESIDENT, db, building_id)
 
 
@@ -81,7 +72,7 @@ def create_resident(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return create_user_by_role(payload, UserRole.RESIDENT, db, building_id)
 
 
@@ -92,7 +83,7 @@ def invite_resident(
     db: Session = Depends(get_db),
 ) -> InviteManagedUserResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return invite_user_by_role(payload, UserRole.RESIDENT, db, building_id)
 
 
@@ -102,7 +93,7 @@ def list_units(
     db: Session = Depends(get_db),
 ) -> list[UnitResponse]:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return list_units_for_building(db, building_id)
 
 
@@ -113,7 +104,7 @@ def create_unit(
     db: Session = Depends(get_db),
 ) -> UnitResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return create_unit_for_building(db, building_id, payload)
 
 
@@ -125,7 +116,7 @@ def update_unit(
     db: Session = Depends(get_db),
 ) -> UnitResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return update_unit_for_building(db, building_id, unit_id, payload)
 
 
@@ -136,7 +127,7 @@ def delete_unit(
     db: Session = Depends(get_db),
 ) -> dict:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return delete_unit_for_building(db, building_id, unit_id)
 
 
@@ -148,7 +139,7 @@ def update_resident(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return update_user_by_role(user_id, payload, UserRole.RESIDENT, db, building_id)
 
 
@@ -159,7 +150,7 @@ def delete_resident(
     db: Session = Depends(get_db),
 ) -> dict:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return delete_user_by_role(user_id, UserRole.RESIDENT, db, building_id)
 
 
@@ -169,7 +160,7 @@ def list_security(
     db: Session = Depends(get_db),
 ) -> list[ManagedUserResponse]:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return list_users_by_role(UserRole.SECURITY, db, building_id)
 
 
@@ -180,7 +171,7 @@ def create_security(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return create_user_by_role(payload, UserRole.SECURITY, db, building_id)
 
 
@@ -191,7 +182,7 @@ def invite_security(
     db: Session = Depends(get_db),
 ) -> InviteManagedUserResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return invite_user_by_role(payload, UserRole.SECURITY, db, building_id)
 
 
@@ -203,7 +194,7 @@ def update_security(
     db: Session = Depends(get_db),
 ) -> ManagedUserResponse:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return update_user_by_role(user_id, payload, UserRole.SECURITY, db, building_id)
 
 
@@ -214,5 +205,5 @@ def delete_security(
     db: Session = Depends(get_db),
 ) -> dict:
     require_admin(current_user)
-    building_id = _get_admin_building_id(current_user, db)
+    building_id = get_admin_building_id(db, current_user.id)
     return delete_user_by_role(user_id, UserRole.SECURITY, db, building_id)

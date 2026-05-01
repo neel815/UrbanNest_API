@@ -2,83 +2,137 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Optional
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.resident import (
-    AnnouncementPriority,
-    BuildingStatus,
-    BuildingType,
-    ForumPostCategory,
     MaintenanceCategory,
     MaintenancePriority,
     MaintenanceStatus,
     PaymentStatus,
     PaymentType,
-    SecurityShift,
-    UnitStatus,
     VisitorStatus,
 )
 
 
-class BuildingCreateRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=150)
-    address: str = Field(min_length=5, max_length=255)
-    description: str | None = Field(default=None, max_length=5000)
-    building_type: BuildingType = BuildingType.APARTMENT_TOWER
-    status: BuildingStatus = BuildingStatus.ACTIVE
+class DashboardStats(BaseModel):
+    announcements_count: int
+    pending_maintenance: int
+    active_visitors: int
+    total_due: float
 
 
-class BuildingUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=2, max_length=150)
-    address: str | None = Field(default=None, min_length=5, max_length=255)
-    description: str | None = Field(default=None, max_length=5000)
-    building_type: BuildingType | None = None
-    status: BuildingStatus | None = None
+class ResidentProfileSummary(BaseModel):
+    full_name: str
+    unit_number: str | None = None
+    building_name: str | None = None
+    society_name: str | None = None
 
 
-class BuildingResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class Announcement(BaseModel):
+    id: str
+    title: str
+    content: str
+    date: str
+    priority: str
+    author: str
 
-    id: UUID
+
+class MaintenanceRequest(BaseModel):
+    id: int
+    title: str
+    description: str
+    category: str
+    priority: str
+    status: str
+    date: str
+    lastUpdated: str
+
+
+class MaintenanceCreateRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=5, max_length=1000)
+    category: str = Field(min_length=2, max_length=80)
+    priority: str = Field(pattern="^(low|medium|high)$")
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: str) -> str:
+        return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def normalize_priority(cls, value: str) -> str:
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class Visitor(BaseModel):
+    id: int
     name: str
-    address: str
-    description: str | None
-    building_type: BuildingType
-    status: BuildingStatus
-    created_at: datetime
-    updated_at: datetime
+    purpose: str
+    date: str
+    timeIn: str
+    timeOut: Optional[str]
+    status: str
+    contactNumber: str
+    vehicleNumber: Optional[str]
 
 
-class UnitCreateRequest(BaseModel):
-    building_id: UUID
-    unit_number: str = Field(min_length=1, max_length=50)
-    floor: int | None = Field(default=None, ge=-10, le=200)
-    plot_number: str | None = Field(default=None, max_length=50)
-    status: UnitStatus = UnitStatus.VACANT
+class VisitorCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    purpose: str = Field(min_length=2, max_length=200)
+    date: str
+    timeIn: str
+    contactNumber: str = Field(min_length=5, max_length=30)
+    vehicleNumber: Optional[str] = None
 
 
-class UnitUpdateRequest(BaseModel):
-    building_id: UUID | None = None
-    unit_number: str | None = Field(default=None, min_length=1, max_length=50)
-    floor: int | None = Field(default=None, ge=-10, le=200)
-    plot_number: str | None = Field(default=None, max_length=50)
-    status: UnitStatus | None = None
+class VisitorStatusUpdateRequest(BaseModel):
+    status: str = Field(pattern="^(checked_in|checked_out)$")
 
 
-class UnitResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class Payment(BaseModel):
+    id: int
+    type: str
+    description: str
+    amount: float
+    dueDate: str
+    status: str
+    paidDate: Optional[str]
+    paymentMethod: Optional[str]
 
-    id: UUID
-    building_id: UUID
-    unit_number: str
-    floor: int | None
-    plot_number: str | None
-    status: UnitStatus
-    created_at: datetime
-    updated_at: datetime
+
+class Event(BaseModel):
+    id: int
+    title: str
+    description: str
+    date: str
+    time: str
+    location: str
+    type: str
+    attendees: int
+    maxAttendees: Optional[int]
+    isRegistered: bool
+
+
+class ForumPost(BaseModel):
+    id: int
+    title: str
+    content: str
+    author: str
+    date: str
+    category: str
+    replies: int
+    lastActivity: str
+
+
+class ForumPostCreateRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+    content: str = Field(min_length=5, max_length=3000)
+    category: str = Field(pattern="^(general|complaints|suggestions|marketplace)$")
 
 
 class ResidentProfileCreateRequest(BaseModel):
@@ -108,63 +162,6 @@ class ResidentProfileResponse(BaseModel):
     move_out_date: datetime | None
     emergency_contact_name: str | None
     emergency_contact_phone: str | None
-    created_at: datetime
-    updated_at: datetime
-
-
-class SecurityProfileCreateRequest(BaseModel):
-    user_id: UUID
-    badge_number: str | None = Field(default=None, max_length=64)
-    shift: SecurityShift = SecurityShift.ROTATING
-    assigned_building_id: UUID | None = None
-    is_active: bool = True
-
-
-class SecurityProfileUpdateRequest(BaseModel):
-    badge_number: str | None = Field(default=None, max_length=64)
-    shift: SecurityShift | None = None
-    assigned_building_id: UUID | None = None
-    is_active: bool | None = None
-
-
-class SecurityProfileResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    user_id: UUID
-    badge_number: str | None
-    shift: SecurityShift
-    assigned_building_id: UUID | None
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class AnnouncementCreateRequest(BaseModel):
-    title: str = Field(min_length=2, max_length=200)
-    content: str = Field(min_length=5, max_length=5000)
-    priority: AnnouncementPriority = AnnouncementPriority.MEDIUM
-    author_user_id: UUID | None = None
-    published_at: datetime | None = None
-
-
-class AnnouncementUpdateRequest(BaseModel):
-    title: str | None = Field(default=None, min_length=2, max_length=200)
-    content: str | None = Field(default=None, min_length=5, max_length=5000)
-    priority: AnnouncementPriority | None = None
-    author_user_id: UUID | None = None
-    published_at: datetime | None = None
-
-
-class AnnouncementResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    title: str
-    content: str
-    priority: AnnouncementPriority
-    author_user_id: UUID | None
-    published_at: datetime
     created_at: datetime
     updated_at: datetime
 
@@ -274,70 +271,5 @@ class PaymentResponse(BaseModel):
     paid_date: date | None
     transaction_ref: str | None
     description: str | None
-    created_at: datetime
-    updated_at: datetime
-
-
-class EventCreateRequest(BaseModel):
-    title: str = Field(min_length=2, max_length=200)
-    description: str | None = Field(default=None, max_length=5000)
-    location: str | None = Field(default=None, max_length=255)
-    event_date: datetime
-    created_by: UUID
-    is_active: bool = True
-
-
-class EventUpdateRequest(BaseModel):
-    title: str | None = Field(default=None, min_length=2, max_length=200)
-    description: str | None = Field(default=None, max_length=5000)
-    location: str | None = Field(default=None, max_length=255)
-    event_date: datetime | None = None
-    created_by: UUID | None = None
-    is_active: bool | None = None
-
-
-class EventResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    title: str
-    description: str | None
-    location: str | None
-    event_date: datetime
-    created_by: UUID
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class ForumPostCreateRequest(BaseModel):
-    title: str = Field(min_length=2, max_length=200)
-    content: str = Field(min_length=5, max_length=5000)
-    category: ForumPostCategory
-    author_id: UUID
-    is_pinned: bool = False
-
-
-class ForumPostUpdateRequest(BaseModel):
-    title: str | None = Field(default=None, min_length=2, max_length=200)
-    content: str | None = Field(default=None, min_length=5, max_length=5000)
-    category: ForumPostCategory | None = None
-    author_id: UUID | None = None
-    is_pinned: bool | None = None
-    upvotes: int | None = Field(default=None, ge=0)
-    is_active: bool | None = None
-
-
-class ForumPostResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    title: str
-    content: str
-    category: ForumPostCategory
-    author_id: UUID
-    is_pinned: bool
-    upvotes: int
-    is_active: bool
     created_at: datetime
     updated_at: datetime
