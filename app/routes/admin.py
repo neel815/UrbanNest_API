@@ -1,11 +1,17 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.schemas.admin import (
+    AnnouncementCreateRequest,
+    AnnouncementResponse,
     AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
+    EventCreateRequest,
+    EventResponse,
     CreateManagedUserRequest,
     UnitCreateRequest,
     UnitResponse,
@@ -16,13 +22,19 @@ from app.schemas.admin import (
     UpdateManagedUserRequest,
 )
 from app.services.admin_user_service import (
+    create_announcement,
+    create_event,
     create_user_by_role,
     create_unit_for_building,
+    delete_announcement,
+    delete_event,
     delete_user_by_role,
     delete_unit_for_building,
     get_admin_dashboard_stats,
     get_admin_building_info,
     get_admin_building_id,
+    get_announcements,
+    get_events,
     invite_user_by_role,
     list_users_by_role,
     list_units_for_building,
@@ -53,6 +65,70 @@ def building_info(
     require_admin(current_user)
     building_id = get_admin_building_id(db, current_user.id)
     return get_admin_building_info(db, building_id)
+
+
+@router.get("/announcements", response_model=list[AnnouncementResponse])
+def list_announcements(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[AnnouncementResponse]:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_announcements(db, building_id)
+
+
+@router.post("/announcements", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
+def create_admin_announcement(
+    payload: AnnouncementCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnnouncementResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return create_announcement(db, building_id, current_user.id, payload)
+
+
+@router.delete("/announcements/{announcement_id}")
+def remove_admin_announcement(
+    announcement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return delete_announcement(db, building_id, announcement_id)
+
+
+@router.get("/events", response_model=list[EventResponse])
+def list_events(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[EventResponse]:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_events(db, building_id)
+
+
+@router.post("/events", response_model=EventResponse, status_code=status.HTTP_201_CREATED)
+def create_admin_event(
+    payload: EventCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EventResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return create_event(db, building_id, current_user.id, payload)
+
+
+@router.delete("/events/{event_id}")
+def remove_admin_event(
+    event_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return delete_event(db, building_id, event_id)
 
 
 @router.get("/residents", response_model=list[ManagedUserResponse])

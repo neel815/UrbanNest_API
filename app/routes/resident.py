@@ -1,21 +1,23 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
 from app.schemas.resident import (
-    Announcement,
+    AnnouncementResponse,
     DashboardStats,
-    Event,
-    ForumPost,
+    EventResponse,
     ForumPostCreateRequest,
+    ForumPostResponse,
     MaintenanceCreateRequest,
-    MaintenanceRequest,
-    Payment,
+    MaintenanceRequestResponse,
+    PaymentResponse,
     ResidentProfileSummary,
-    Visitor,
     VisitorCreateRequest,
-    VisitorStatusUpdateRequest,
+    VisitorResponse,
+    VisitorUpdateRequest,
 )
 from app.services.auth_service import get_current_user
 from app.services.resident_service import (
@@ -31,7 +33,6 @@ from app.services.resident_service import (
     get_resident_profile,
     get_visitors,
     pay_payment,
-    register_for_event,
     require_resident,
     update_visitor_status,
 )
@@ -61,16 +62,16 @@ async def get_dashboard_stats_endpoint(
 async def get_announcements_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[Announcement]:
+) -> list[AnnouncementResponse]:
     require_resident(current_user)
-    return get_announcements(db, None)
+    return get_announcements(db, current_user.id)
 
 
 @router.get("/maintenance")
 async def get_maintenance_requests_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[MaintenanceRequest]:
+) -> list[MaintenanceRequestResponse]:
     require_resident(current_user)
     return get_maintenance_requests(db, current_user.id)
 
@@ -80,7 +81,7 @@ async def create_maintenance_request_endpoint(
     request: MaintenanceCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> MaintenanceRequest:
+) -> MaintenanceRequestResponse:
     require_resident(current_user)
     return create_maintenance_request(db, current_user.id, request)
 
@@ -89,7 +90,7 @@ async def create_maintenance_request_endpoint(
 async def get_visitors_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[Visitor]:
+) -> list[VisitorResponse]:
     require_resident(current_user)
     return get_visitors(db, current_user.id)
 
@@ -99,18 +100,18 @@ async def create_visitor_endpoint(
     visitor: VisitorCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Visitor:
+) -> VisitorResponse:
     require_resident(current_user)
     return create_visitor(db, current_user.id, visitor)
 
 
 @router.patch("/visitors/{visitor_id}")
 async def update_visitor_status_endpoint(
-    visitor_id: int,
-    status_update: VisitorStatusUpdateRequest,
+    visitor_id: UUID,
+    status_update: VisitorUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Visitor:
+) -> VisitorResponse:
     require_resident(current_user)
     return update_visitor_status(db, current_user.id, visitor_id, status_update)
 
@@ -119,17 +120,17 @@ async def update_visitor_status_endpoint(
 async def get_payments_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[Payment]:
+) -> list[PaymentResponse]:
     require_resident(current_user)
     return get_payments(db, current_user.id)
 
 
 @router.post("/payments/{payment_id}/pay")
 async def pay_payment_endpoint(
-    payment_id: int,
+    payment_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Payment:
+) -> PaymentResponse:
     require_resident(current_user)
     return pay_payment(db, current_user.id, payment_id)
 
@@ -138,26 +139,16 @@ async def pay_payment_endpoint(
 async def get_events_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[Event]:
+) -> list[EventResponse]:
     require_resident(current_user)
     return get_events(db, current_user.id)
-
-
-@router.post("/events/{event_id}/register")
-async def register_for_event_endpoint(
-    event_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> Event:
-    require_resident(current_user)
-    return register_for_event(db, current_user.id, event_id)
 
 
 @router.get("/forum-posts")
 async def get_forum_posts_endpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> list[ForumPost]:
+) -> list[ForumPostResponse]:
     require_resident(current_user)
     return get_forum_posts(db, current_user.id)
 
@@ -167,6 +158,6 @@ async def create_forum_post_endpoint(
     post: ForumPostCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> ForumPost:
+) -> ForumPostResponse:
     require_resident(current_user)
-    return create_forum_post(db, current_user.id, post, current_user.full_name)
+    return create_forum_post(db, current_user.id, post)

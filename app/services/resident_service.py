@@ -1,43 +1,39 @@
 from datetime import datetime, timezone
-from itertools import count
-from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.admin import Announcement as ResidentAnnouncement
-from app.models.user import User, UserRole
-from app.schemas.resident import (
-    Announcement,
-    DashboardStats,
+from app.models.admin import AdminProfile, Announcement as AnnouncementModel, Building, Unit
+from app.models.resident import (
     Event,
     ForumPost,
-    ForumPostCreateRequest,
-    MaintenanceCreateRequest,
+    MaintenanceCategory,
+    MaintenancePriority,
     MaintenanceRequest,
+    MaintenanceStatus,
     Payment,
-    ResidentProfileSummary,
+    PaymentStatus,
+    ResidentProfile,
     Visitor,
-    VisitorCreateRequest,
-    VisitorStatusUpdateRequest,
+    VisitorStatus,
 )
-
-_maintenance_id_gen = count(1)
-_visitor_id_gen = count(1)
-_payment_id_gen = count(1)
-_event_id_gen = count(1)
-_forum_post_id_gen = count(1)
-
-_maintenance_store: dict[str, list[dict]] = {}
-_visitors_store: dict[str, list[dict]] = {}
-_payments_store: dict[str, list[dict]] = {}
-_events_store: dict[str, list[dict]] = {}
-_forum_posts_store: dict[str, list[dict]] = {}
-
-
-def _resident_key(user_id: UUID | str) -> str:
-    return str(user_id)
+from app.models.user import User, UserRole
+from app.schemas.resident import (
+    AnnouncementResponse,
+    DashboardStats,
+    EventResponse,
+    ForumPostCreateRequest,
+    ForumPostResponse,
+    MaintenanceCreateRequest,
+    MaintenanceRequestResponse,
+    PaymentResponse,
+    ResidentProfileSummary,
+    VisitorCreateRequest,
+    VisitorResponse,
+    VisitorUpdateRequest,
+)
 
 
 def require_resident(user: User) -> None:
@@ -45,223 +41,276 @@ def require_resident(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Resident only")
 
 
-def _get_announcements_for_resident(db: Session) -> list[Announcement]:
-    announcements = (
-        db.query(ResidentAnnouncement)
-        .order_by(ResidentAnnouncement.published_at.desc(), ResidentAnnouncement.created_at.desc())
-        .limit(5)
-        .all()
+def _get_resident_profile_entity(db: Session, user_id: UUID) -> ResidentProfile:
+    profile = (
+        db.query(ResidentProfile)
+        .options(joinedload(ResidentProfile.unit).joinedload(Unit.building))
+        .filter(ResidentProfile.user_id == user_id)
+        .first()
     )
-    return [
-        Announcement(
-            id=str(announcement.id),
-            title=announcement.title,
-            content=announcement.content,
-            date=announcement.published_at.date().isoformat(),
-            priority=announcement.priority.value if hasattr(announcement.priority, "value") else str(announcement.priority),
-            author=announcement.author.full_name if announcement.author else "Management Team",
-        )
-        for announcement in announcements
-    ]
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident profile not found")
+    return profile
+
+
+def _get_resident_building_id(db: Session, user_id: UUID) -> UUID | None:
+    profile = _get_resident_profile_entity(db, user_id)
+    return profile.unit.building_id if profile.unit is not None else None
+
+
+def _announcement_query(db: Session, building_id: UUID | None = None):
+    query = db.query(AnnouncementModel)
+    if building_id is None:
+        return query.filter(False)
+    return query.filter(AnnouncementModel.building_id == building_id)
+
+
+def _to_announcement_response(announcement: AnnouncementModel) -> AnnouncementResponse:
+    return AnnouncementResponse.model_validate(announcement)
+
+
+def _to_maintenance_response(record: MaintenanceRequest) -> MaintenanceRequestResponse:
+    return MaintenanceRequestResponse.model_validate(record)
+
+
+def _to_visitor_response(record: Visitor) -> VisitorResponse:
+    response = VisitorResponse.model_validate(record)
+    if getattr(record, "vehicle_number", None) is not None:
+        response.vehicle_number = getattr(record, "vehicle_number")
+    return response
+
+
+def _to_payment_response(record: Payment) -> PaymentResponse:
+    return PaymentResponse.model_validate(record)
+
+
+def _to_event_response(record: Event) -> EventResponse:
+    return EventResponse.model_validate(record)
+
+
+def _to_forum_post_response(record: ForumPost) -> ForumPostResponse:
+    return ForumPostResponse.model_validate(record)
 
 
 def get_resident_profile(db: Session, user_id: UUID | str) -> ResidentProfileSummary:
-    resident_user = (
-        db.query(User)
-        .options(joinedload(User.resident_profile).joinedload("unit").joinedload("building"))
-        .filter(User.id == user_id)
-        .first()
-    )
-    if not resident_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident not found")
-
-    profile = resident_user.resident_profile
-    unit = profile.unit if profile else None
-    building = unit.building if unit else None
-    building_name = building.name if building else None
+    profile = _get_resident_profile_entity(db, UUID(str(user_id)))
+    unit = profile.unit
+    building_name = unit.building.name if unit and unit.building else None
 
     return ResidentProfileSummary(
-        full_name=resident_user.full_name,
+        full_name=profile.user.full_name,
         unit_number=unit.unit_number if unit else None,
         building_name=building_name,
-        society_name=building_name,
     )
 
 
 def get_dashboard_stats(db: Session, user_id: UUID | str) -> DashboardStats:
-    key = _resident_key(user_id)
-    maintenance = _maintenance_store.get(key, [])
-    visitors = _visitors_store.get(key, [])
-    payments = _payments_store.get(key, [])
-    announcements = _get_announcements_for_resident(db)
-
-    pending_maintenance = len([item for item in maintenance if item.get("status") in {"pending", "in_progress"}])
-    active_visitors = len([item for item in visitors if item.get("status") == "checked_in"])
-    total_due = sum(
-        float(item.get("amount", 0))
-        for item in payments
-        if item.get("status") in {"pending", "overdue"}
+    parsed_user_id = UUID(str(user_id))
+    announcements_count = len(get_announcements(db, parsed_user_id))
+    pending_maintenance = (
+        db.query(func.count(MaintenanceRequest.id))
+        .filter(
+            MaintenanceRequest.resident_id == parsed_user_id,
+            MaintenanceRequest.status.in_([MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS]),
+        )
+        .scalar()
+        or 0
+    )
+    active_visitors = (
+        db.query(func.count(Visitor.id))
+        .filter(Visitor.resident_id == parsed_user_id, Visitor.status == VisitorStatus.CHECKED_IN)
+        .scalar()
+        or 0
+    )
+    total_due = (
+        db.query(func.coalesce(func.sum(Payment.amount), 0))
+        .filter(
+            Payment.resident_id == parsed_user_id,
+            Payment.status.in_([PaymentStatus.PENDING, PaymentStatus.OVERDUE]),
+        )
+        .scalar()
+        or 0
     )
 
     return DashboardStats(
-        announcements_count=len(announcements),
+        announcements_count=announcements_count,
         pending_maintenance=pending_maintenance,
         active_visitors=active_visitors,
-        total_due=round(total_due, 2),
+        total_due=float(total_due),
     )
 
 
-def get_announcements(db: Session, building_id: UUID | str | None = None) -> list[Announcement]:
-    return _get_announcements_for_resident(db)
+def get_announcements(db: Session, user_id: UUID | str) -> list[AnnouncementResponse]:
+    parsed_user_id = UUID(str(user_id))
+    building_id = _get_resident_building_id(db, parsed_user_id)
+    if building_id is None:
+        return []
+
+    announcements = (
+        _announcement_query(db, building_id)
+        .order_by(AnnouncementModel.published_at.desc(), AnnouncementModel.created_at.desc())
+        .all()
+    )
+    return [_to_announcement_response(announcement) for announcement in announcements]
 
 
-def get_maintenance_requests(db: Session, user_id: UUID | str) -> list[MaintenanceRequest]:
-    key = _resident_key(user_id)
-    return [MaintenanceRequest(**item) for item in _maintenance_store.get(key, [])]
+def get_maintenance_requests(db: Session, user_id: UUID | str) -> list[MaintenanceRequestResponse]:
+    parsed_user_id = UUID(str(user_id))
+    records = (
+        db.query(MaintenanceRequest)
+        .filter(MaintenanceRequest.resident_id == parsed_user_id)
+        .order_by(MaintenanceRequest.created_at.desc())
+        .all()
+    )
+    return [_to_maintenance_response(record) for record in records]
 
 
-def create_maintenance_request(db: Session, user_id: UUID | str, data: MaintenanceCreateRequest) -> MaintenanceRequest:
-    key = _resident_key(user_id)
-    now_iso_date = datetime.now(timezone.utc).date().isoformat()
-    new_item = {
-        "id": next(_maintenance_id_gen),
-        "title": data.title,
-        "description": data.description,
-        "category": data.category,
-        "priority": data.priority,
-        "status": "pending",
-        "date": now_iso_date,
-        "lastUpdated": now_iso_date,
-    }
-    _maintenance_store.setdefault(key, []).insert(0, new_item)
-    return MaintenanceRequest(**new_item)
+def create_maintenance_request(db: Session, user_id: UUID | str, data: MaintenanceCreateRequest) -> MaintenanceRequestResponse:
+    parsed_user_id = UUID(str(user_id))
+    profile = _get_resident_profile_entity(db, parsed_user_id)
+    record = MaintenanceRequest(
+        title=data.title,
+        description=data.description,
+        category=data.category,
+        priority=data.priority,
+        resident_id=parsed_user_id,
+        unit_id=profile.unit_id,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _to_maintenance_response(record)
 
 
-def update_maintenance_request(db: Session, request_id: int, data: dict[str, Any]) -> MaintenanceRequest:
-    user_id = data.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required")
-
-    key = _resident_key(user_id)
-    resident_requests = _maintenance_store.get(key, [])
-    target = next((item for item in resident_requests if item.get("id") == request_id), None)
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance request not found")
-
-    for field in ("title", "description", "category", "priority", "status"):
-        if field in data and data[field] is not None:
-            target[field] = data[field]
-    target["lastUpdated"] = datetime.now(timezone.utc).date().isoformat()
-    return MaintenanceRequest(**target)
+def get_visitors(db: Session, user_id: UUID | str) -> list[VisitorResponse]:
+    parsed_user_id = UUID(str(user_id))
+    records = (
+        db.query(Visitor)
+        .filter(Visitor.resident_id == parsed_user_id)
+        .order_by(Visitor.expected_date.desc(), Visitor.created_at.desc())
+        .all()
+    )
+    return [_to_visitor_response(record) for record in records]
 
 
-def get_visitors(db: Session, user_id: UUID | str) -> list[Visitor]:
-    key = _resident_key(user_id)
-    return [Visitor(**item) for item in _visitors_store.get(key, [])]
+def create_visitor(db: Session, user_id: UUID | str, data: VisitorCreateRequest) -> VisitorResponse:
+    parsed_user_id = UUID(str(user_id))
+    record = Visitor(
+        visitor_name=data.visitor_name,
+        visitor_phone=data.visitor_phone,
+        purpose=data.purpose,
+        resident_id=parsed_user_id,
+        expected_date=data.expected_date,
+        status=VisitorStatus.PENDING,
+    )
+    setattr(record, "vehicle_number", data.vehicle_number)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    setattr(record, "vehicle_number", data.vehicle_number)
+    return _to_visitor_response(record)
 
 
-def create_visitor(db: Session, user_id: UUID | str, data: VisitorCreateRequest) -> Visitor:
-    key = _resident_key(user_id)
-    new_item = {
-        "id": next(_visitor_id_gen),
-        "name": data.name,
-        "purpose": data.purpose,
-        "date": data.date,
-        "timeIn": data.timeIn,
-        "timeOut": None,
-        "status": "expected",
-        "contactNumber": data.contactNumber,
-        "vehicleNumber": data.vehicleNumber,
-    }
-    _visitors_store.setdefault(key, []).insert(0, new_item)
-    return Visitor(**new_item)
-
-
-def update_visitor(db: Session, visitor_id: int, data: dict[str, Any]) -> Visitor:
-    user_id = data.get("user_id")
-    status_update = data.get("status")
-
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required")
-    if not status_update:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status is required")
-
-    key = _resident_key(user_id)
-    resident_visitors = _visitors_store.get(key, [])
-    target = next((item for item in resident_visitors if item.get("id") == visitor_id), None)
-    if not target:
+def update_visitor_status(db: Session, user_id: UUID | str, visitor_id: UUID | str, data: VisitorUpdateRequest) -> VisitorResponse:
+    parsed_user_id = UUID(str(user_id))
+    parsed_visitor_id = UUID(str(visitor_id))
+    record = (
+        db.query(Visitor)
+        .filter(Visitor.id == parsed_visitor_id, Visitor.resident_id == parsed_user_id)
+        .first()
+    )
+    if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
 
-    target["status"] = status_update
-    if status_update == "checked_out":
-        target["timeOut"] = datetime.now(timezone.utc).strftime("%H:%M")
-    return Visitor(**target)
+    if data.status is not None:
+        record.status = data.status
+    if data.check_in_time is not None:
+        record.check_in_time = data.check_in_time
+    elif data.status == VisitorStatus.CHECKED_IN:
+        record.check_in_time = datetime.now(timezone.utc)
+    if data.check_out_time is not None:
+        record.check_out_time = data.check_out_time
+    elif data.status == VisitorStatus.CHECKED_OUT:
+        record.check_out_time = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(record)
+    return _to_visitor_response(record)
 
 
-def update_visitor_status(db: Session, user_id: UUID | str, visitor_id: int, status_update: VisitorStatusUpdateRequest) -> Visitor:
-    return update_visitor(
-        db,
-        visitor_id,
-        {
-            "user_id": user_id,
-            "status": status_update.status,
-        },
+def get_payments(db: Session, user_id: UUID | str) -> list[PaymentResponse]:
+    parsed_user_id = UUID(str(user_id))
+    records = (
+        db.query(Payment)
+        .filter(Payment.resident_id == parsed_user_id)
+        .order_by(Payment.due_date.desc(), Payment.created_at.desc())
+        .all()
     )
+    return [_to_payment_response(record) for record in records]
 
 
-def get_payments(db: Session, user_id: UUID | str) -> list[Payment]:
-    key = _resident_key(user_id)
-    return [Payment(**item) for item in _payments_store.get(key, [])]
-
-
-def pay_payment(db: Session, user_id: UUID | str, payment_id: int) -> Payment:
-    key = _resident_key(user_id)
-    resident_payments = _payments_store.get(key, [])
-    target = next((item for item in resident_payments if item.get("id") == payment_id), None)
-    if not target:
+def pay_payment(db: Session, user_id: UUID | str, payment_id: UUID | str) -> PaymentResponse:
+    parsed_user_id = UUID(str(user_id))
+    parsed_payment_id = UUID(str(payment_id))
+    record = (
+        db.query(Payment)
+        .filter(Payment.id == parsed_payment_id, Payment.resident_id == parsed_user_id)
+        .first()
+    )
+    if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
-    target["status"] = "paid"
-    target["paidDate"] = datetime.now(timezone.utc).date().isoformat()
-    target["paymentMethod"] = "online"
-    return Payment(**target)
+    record.status = PaymentStatus.PAID
+    if record.paid_date is None:
+        record.paid_date = datetime.now(timezone.utc).date()
+    if record.transaction_ref is None:
+        record.transaction_ref = "online"
+    db.commit()
+    db.refresh(record)
+    return _to_payment_response(record)
 
 
-def get_events(db: Session, building_id: UUID | str | None = None) -> list[Event]:
-    key = _resident_key(building_id) if building_id is not None else ""
-    return [Event(**item) for item in _events_store.get(key, [])]
+def get_events(db: Session, user_id: UUID | str) -> list[EventResponse]:
+    parsed_user_id = UUID(str(user_id))
+    building_id = _get_resident_building_id(db, parsed_user_id)
+    if building_id is None:
+        return []
+
+    records = (
+        db.query(Event)
+        .filter(
+            Event.building_id == building_id,
+            Event.is_active.is_(True),
+            Event.event_date >= datetime.now(timezone.utc),
+        )
+        .order_by(Event.event_date.asc(), Event.created_at.desc())
+        .all()
+    )
+    return [_to_event_response(record) for record in records]
 
 
-def register_for_event(db: Session, user_id: UUID | str, event_id: int) -> Event:
-    key = _resident_key(user_id)
-    resident_events = _events_store.get(key, [])
-    target = next((item for item in resident_events if item.get("id") == event_id), None)
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-
-    if not target.get("isRegistered"):
-        target["isRegistered"] = True
-        target["attendees"] = int(target.get("attendees", 0)) + 1
-    return Event(**target)
+def get_forum_posts(db: Session, user_id: UUID | str) -> list[ForumPostResponse]:
+    records = (
+        db.query(ForumPost)
+        .filter(ForumPost.is_active.is_(True))
+        .order_by(ForumPost.is_pinned.desc(), ForumPost.created_at.desc(), ForumPost.upvotes.desc())
+        .all()
+    )
+    return [_to_forum_post_response(record) for record in records]
 
 
-def get_forum_posts(db: Session, building_id: UUID | str | None = None) -> list[ForumPost]:
-    key = _resident_key(building_id) if building_id is not None else ""
-    return [ForumPost(**item) for item in _forum_posts_store.get(key, [])]
-
-
-def create_forum_post(db: Session, user_id: UUID | str, data: ForumPostCreateRequest, full_name: str) -> ForumPost:
-    key = _resident_key(user_id)
-    today = datetime.now(timezone.utc).date().isoformat()
-    new_item = {
-        "id": next(_forum_post_id_gen),
-        "title": data.title,
-        "content": data.content,
-        "author": full_name,
-        "date": today,
-        "category": data.category,
-        "replies": 0,
-        "lastActivity": today,
-    }
-    _forum_posts_store.setdefault(key, []).insert(0, new_item)
-    return ForumPost(**new_item)
+def create_forum_post(db: Session, user_id: UUID | str, data: ForumPostCreateRequest) -> ForumPostResponse:
+    parsed_user_id = UUID(str(user_id))
+    record = ForumPost(
+        title=data.title,
+        content=data.content,
+        category=data.category,
+        author_id=parsed_user_id,
+        is_pinned=False,
+        upvotes=0,
+        is_active=True,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _to_forum_post_response(record)

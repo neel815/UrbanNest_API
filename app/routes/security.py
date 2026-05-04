@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
+from app.schemas.resident import AnnouncementResponse
 from app.services import security_service
 from app.services.auth_service import get_current_user
 
@@ -137,12 +138,30 @@ def _service_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status_code, detail=message)
 
 
+def _require_security(current_user: User) -> None:
+    if current_user.role.value != "security":
+        raise HTTPException(status_code=403, detail="Security only")
+
+
 @router.get("/dashboard-stats")
 async def get_dashboard_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     return security_service.get_dashboard_stats(db)
+
+
+@router.get("/announcements", response_model=list[AnnouncementResponse])
+async def get_announcements(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_security(current_user)
+    try:
+        return security_service.get_announcements(db, current_user.id)
+    except ValueError as exc:
+        raise _service_error(exc) from exc
 
 
 @router.get("/visitors")
@@ -150,6 +169,7 @@ async def get_visitors(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     return security_service.get_visitors(db)
 
 
@@ -159,6 +179,7 @@ async def create_visitor(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.create_visitor(db, current_user, visitor)
     except ValueError as exc:
@@ -172,6 +193,7 @@ async def update_visitor_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.update_visitor_status(
             db,
@@ -188,6 +210,7 @@ async def get_access_points(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     return security_service.get_access_points(db)
 
 
@@ -196,6 +219,7 @@ async def get_access_logs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     return security_service.get_access_logs(db)
 
 
@@ -205,6 +229,7 @@ async def toggle_access_point(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.toggle_access_point(db, point_id)
     except ValueError as exc:
@@ -216,6 +241,7 @@ async def get_patrol_rounds(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     return security_service.get_patrol_rounds(db)
 
 

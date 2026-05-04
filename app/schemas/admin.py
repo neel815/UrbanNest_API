@@ -87,8 +87,6 @@ class AnnouncementCreateRequest(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     content: str = Field(min_length=5, max_length=5000)
     priority: AnnouncementPriority = AnnouncementPriority.MEDIUM
-    author_user_id: UUID | None = None
-    published_at: datetime | None = None
 
 
 class AnnouncementUpdateRequest(BaseModel):
@@ -103,6 +101,7 @@ class AnnouncementResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    building_id: UUID | None
     title: str
     content: str
     priority: AnnouncementPriority
@@ -117,8 +116,6 @@ class EventCreateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=5000)
     location: str | None = Field(default=None, max_length=255)
     event_date: datetime
-    created_by: UUID
-    is_active: bool = True
 
 
 class EventUpdateRequest(BaseModel):
@@ -138,6 +135,7 @@ class EventResponse(BaseModel):
     description: str | None
     location: str | None
     event_date: datetime
+    building_id: UUID | None
     created_by: UUID
     is_active: bool
     created_at: datetime

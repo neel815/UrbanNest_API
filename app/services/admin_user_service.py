@@ -6,12 +6,16 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.admin import Building, BuildingType, Unit, UnitStatus
-from app.models.resident import ResidentProfile
+from app.models.admin import Announcement, Building, BuildingType, Unit, UnitStatus
+from app.models.resident import Event, ResidentProfile
 from app.models.security import SecurityProfile
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
 from app.schemas.admin import (
+    AnnouncementCreateRequest,
+    AnnouncementResponse,
+    EventCreateRequest,
+    EventResponse,
     AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
@@ -460,3 +464,95 @@ def _normalize_unit_location(building_type: BuildingType, floor: int | None, plo
     if not plot_number:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plot_number is required for this building type")
     return None, plot_number
+
+
+def _serialize_announcement(announcement: Announcement) -> AnnouncementResponse:
+    return AnnouncementResponse.model_validate(announcement)
+
+
+def _serialize_event(event: Event) -> EventResponse:
+    return EventResponse.model_validate(event)
+
+
+def get_announcements(db: Session, building_id: uuid.UUID) -> list[AnnouncementResponse]:
+    announcements = (
+        db.query(Announcement)
+        .filter(Announcement.building_id == building_id)
+        .order_by(Announcement.published_at.desc(), Announcement.created_at.desc())
+        .all()
+    )
+    return [_serialize_announcement(announcement) for announcement in announcements]
+
+
+def create_announcement(
+    db: Session,
+    building_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: AnnouncementCreateRequest,
+) -> AnnouncementResponse:
+    announcement = Announcement(
+        title=data.title,
+        content=data.content,
+        priority=data.priority,
+        author_user_id=user_id,
+        building_id=building_id,
+    )
+    db.add(announcement)
+    db.commit()
+    db.refresh(announcement)
+    return _serialize_announcement(announcement)
+
+
+def delete_announcement(db: Session, building_id: uuid.UUID, announcement_id: uuid.UUID) -> dict:
+    announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+    if not announcement:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found")
+    if announcement.building_id != building_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Announcement does not belong to your building")
+
+    db.delete(announcement)
+    db.commit()
+    return {"message": "Announcement deleted"}
+
+
+def get_events(db: Session, building_id: uuid.UUID) -> list[EventResponse]:
+    events = (
+        db.query(Event)
+        .filter(Event.building_id == building_id, Event.is_active.is_(True))
+        .order_by(Event.event_date.asc(), Event.created_at.desc())
+        .all()
+    )
+    return [_serialize_event(event) for event in events]
+
+
+def create_event(
+    db: Session,
+    building_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: EventCreateRequest,
+) -> EventResponse:
+    event = Event(
+        title=data.title,
+        description=data.description,
+        location=data.location,
+        event_date=data.event_date,
+        building_id=building_id,
+        created_by=user_id,
+        is_active=True,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return _serialize_event(event)
+
+
+def delete_event(db: Session, building_id: uuid.UUID, event_id: uuid.UUID) -> dict:
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    if event.building_id != building_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Event does not belong to your building")
+
+    event.is_active = False
+    db.commit()
+    return {"message": "Event deleted"}

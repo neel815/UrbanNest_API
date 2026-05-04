@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import (
     AccessLog,
     AccessPoint,
+    Announcement,
     Incident,
     PatrolStatus,
     PatrolRound,
@@ -21,6 +22,8 @@ from app.models import (
     VisitorStatus,
 )
 from app.models.user import User, UserRole
+from app.models.security import SecurityProfile
+from app.schemas.resident import AnnouncementResponse
 
 
 def _uuid(value: str | UUID | None) -> UUID | None:
@@ -220,6 +223,13 @@ def _serialize_report(report: SecurityReport) -> dict:
     }
 
 
+def _get_security_building_id(db: Session, user_id: UUID) -> UUID:
+    profile = db.query(SecurityProfile).filter(SecurityProfile.user_id == user_id).first()
+    if not profile or profile.assigned_building_id is None:
+        raise ValueError("Security profile not assigned to any building")
+    return profile.assigned_building_id
+
+
 def get_dashboard_stats(db: Session) -> dict:
     today_start = _today_start()
 
@@ -238,6 +248,17 @@ def get_dashboard_stats(db: Session) -> dict:
         "accessAlerts": access_alerts,
         "totalEntries": total_entries,
     }
+
+
+def get_announcements(db: Session, user_id: str | UUID) -> list[AnnouncementResponse]:
+    building_id = _get_security_building_id(db, _uuid(user_id))
+    records = (
+        db.query(Announcement)
+        .filter(Announcement.building_id == building_id)
+        .order_by(Announcement.published_at.desc(), Announcement.created_at.desc())
+        .all()
+    )
+    return [AnnouncementResponse.model_validate(record) for record in records]
 
 
 def get_visitors(db: Session) -> list[dict]:
