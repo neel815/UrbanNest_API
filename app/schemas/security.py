@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.security import SecurityShift
+from app.schemas.resident import VisitorResponse
 
 
 class SecurityProfileCreateRequest(BaseModel):
@@ -57,6 +58,9 @@ class Visitor(BaseModel):
     hostUnit: str
     approvedBy: str | None
     notes: str | None
+
+
+VisitorActionResponse = VisitorResponse
 
 
 class AccessPoint(BaseModel):

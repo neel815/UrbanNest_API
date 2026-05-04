@@ -1,135 +1,29 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
-from app.schemas.resident import AnnouncementResponse
+from app.schemas.resident import AnnouncementResponse, VisitorResponse
+from app.schemas.security import (
+    DashboardStats,
+    Visitor,
+    AccessPoint,
+    AccessLog,
+    PatrolCheckpoint,
+    PatrolRound,
+    PatrolRoute,
+    Incident,
+    SecurityLog,
+    SecurityReport,
+)
 from app.services import security_service
 from app.services.auth_service import get_current_user
 
 
 router = APIRouter()
-
-
-class DashboardStats(BaseModel):
-    activeVisitors: int
-    pendingApprovals: int
-    incidentsToday: int
-    patrolRounds: int
-    accessAlerts: int
-    totalEntries: int
-
-
-class Visitor(BaseModel):
-    id: str
-    name: str
-    purpose: str
-    date: str
-    timeIn: str
-    timeOut: str | None
-    status: str
-    contactNumber: str
-    vehicleNumber: str | None
-    hostName: str
-    hostUnit: str
-    approvedBy: str | None
-    notes: str | None
-
-
-class AccessPoint(BaseModel):
-    id: str
-    name: str
-    type: str
-    location: str
-    status: str
-    lastAccess: str
-    accessCount: int
-    restrictions: list[str]
-
-
-class AccessLog(BaseModel):
-    id: str
-    accessPoint: str
-    personName: str
-    personType: str
-    accessType: str
-    timestamp: str
-    status: str
-    method: str
-
-
-class PatrolCheckpoint(BaseModel):
-    id: int
-    name: str
-    location: str
-    checkedAt: str | None
-    status: str
-    notes: str | None
-
-
-class PatrolRound(BaseModel):
-    id: str
-    guardName: str
-    startTime: str
-    endTime: str | None
-    status: str
-    route: str
-    checkpoints: list[PatrolCheckpoint]
-    incidents: int
-    notes: str | None
-
-
-class PatrolRoute(BaseModel):
-    id: str
-    name: str
-    description: str
-    estimatedDuration: int
-    checkpoints: list[str]
-    priority: str
-    isActive: bool
-
-
-class Incident(BaseModel):
-    id: str
-    title: str
-    description: str
-    type: str
-    severity: str
-    location: str
-    reportedBy: str
-    reportedAt: str
-    status: str
-    assignedTo: str | None
-    resolvedAt: str | None
-    resolution: str | None
-    attachments: list[str] | None
-
-
-class SecurityLog(BaseModel):
-    id: str
-    timestamp: str
-    type: str
-    category: str
-    description: str
-    severity: str
-    source: str
-    details: dict | None
-    userId: str | None
-    ipAddress: str | None
-
-
-class SecurityReport(BaseModel):
-    id: str
-    title: str
-    type: str
-    generatedAt: str
-    generatedBy: str
-    period: dict
-    summary: dict
-    fileUrl: str | None
 
 
 def _service_error(exc: ValueError) -> HTTPException:
@@ -140,16 +34,16 @@ def _service_error(exc: ValueError) -> HTTPException:
 
 def _require_security(current_user: User) -> None:
     if current_user.role.value != "security":
-        raise HTTPException(status_code=403, detail="Security only")
+        raise HTTPException(status_code=403, detail="Access denied. Security role required.")
 
 
-@router.get("/dashboard-stats")
+@router.get("/dashboard-stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
-    return security_service.get_dashboard_stats(db)
+    return security_service.get_dashboard_stats(db, current_user.id)
 
 
 @router.get("/announcements", response_model=list[AnnouncementResponse])
@@ -164,16 +58,16 @@ async def get_announcements(
         raise _service_error(exc) from exc
 
 
-@router.get("/visitors")
+@router.get("/visitors", response_model=list[Visitor])
 async def get_visitors(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
-    return security_service.get_visitors(db)
+    return security_service.get_visitors(db, current_user.id)
 
 
-@router.post("/visitors")
+@router.post("/visitors", response_model=Visitor)
 async def create_visitor(
     visitor: dict,
     current_user: User = Depends(get_current_user),
@@ -186,7 +80,7 @@ async def create_visitor(
         raise _service_error(exc) from exc
 
 
-@router.patch("/visitors/{visitor_id}")
+@router.patch("/visitors/{visitor_id}", response_model=Visitor)
 async def update_visitor_status(
     visitor_id: UUID,
     status_update: dict,
@@ -205,7 +99,67 @@ async def update_visitor_status(
         raise _service_error(exc) from exc
 
 
-@router.get("/access-points")
+@router.patch("/visitors/{visitor_id}/approve", response_model=VisitorResponse)
+async def approve_visitor(
+    visitor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_security(current_user)
+    try:
+        return security_service.approve_visitor(db, visitor_id, current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+
+
+@router.patch("/visitors/{visitor_id}/deny", response_model=VisitorResponse)
+async def deny_visitor(
+    visitor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_security(current_user)
+    try:
+        return security_service.deny_visitor(db, visitor_id, current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+
+
+@router.patch("/visitors/{visitor_id}/checkin", response_model=VisitorResponse)
+async def checkin_visitor(
+    visitor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_security(current_user)
+    try:
+        return security_service.checkin_visitor(db, visitor_id, current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+
+
+@router.patch("/visitors/{visitor_id}/checkout", response_model=VisitorResponse)
+async def checkout_visitor(
+    visitor_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_security(current_user)
+    try:
+        return security_service.checkout_visitor(db, visitor_id, current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+
+
+@router.get("/access-points", response_model=list[AccessPoint])
 async def get_access_points(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -214,16 +168,16 @@ async def get_access_points(
     return security_service.get_access_points(db)
 
 
-@router.get("/access-logs")
+@router.get("/access-logs", response_model=list[AccessLog])
 async def get_access_logs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
-    return security_service.get_access_logs(db)
+    return security_service.get_access_logs(db, current_user.id)
 
 
-@router.patch("/access-points/{point_id}/toggle")
+@router.patch("/access-points/{point_id}/toggle", response_model=AccessPoint)
 async def toggle_access_point(
     point_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -236,48 +190,51 @@ async def toggle_access_point(
         raise _service_error(exc) from exc
 
 
-@router.get("/patrol-rounds")
+@router.get("/patrol-rounds", response_model=list[PatrolRound])
 async def get_patrol_rounds(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
-    return security_service.get_patrol_rounds(db)
+    return security_service.get_patrol_rounds(db, current_user.id)
 
 
-@router.get("/patrol-routes")
+@router.get("/patrol-routes", response_model=list[PatrolRoute])
 async def get_patrol_routes(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return security_service.get_patrol_routes(db)
+    _require_security(current_user)
+    return security_service.get_patrol_routes(db, current_user.id)
 
 
-@router.post("/patrol-rounds")
+@router.post("/patrol-rounds", response_model=PatrolRound)
 async def start_patrol_round(
     patrol_data: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.start_patrol_round(db, current_user, patrol_data)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
 
-@router.patch("/patrol-rounds/{round_id}/complete")
+@router.patch("/patrol-rounds/{round_id}/complete", response_model=PatrolRound)
 async def complete_patrol_round(
     round_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.complete_patrol_round(db, round_id)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
 
-@router.post("/patrol-rounds/{round_id}/checkpoints/{checkpoint_id}")
+@router.post("/patrol-rounds/{round_id}/checkpoints/{checkpoint_id}", response_model=PatrolRound)
 async def check_checkpoint(
     round_id: UUID,
     checkpoint_id: int,
@@ -285,67 +242,74 @@ async def check_checkpoint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.check_checkpoint(db, round_id, checkpoint_id, data)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
 
-@router.get("/incidents")
+@router.get("/incidents", response_model=list[Incident])
 async def get_incidents(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return security_service.get_incidents(db)
+    _require_security(current_user)
+    return security_service.get_incidents(db, current_user.id)
 
 
-@router.post("/incidents")
+@router.post("/incidents", response_model=Incident)
 async def create_incident(
     incident: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.create_incident(db, current_user, incident)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
 
-@router.patch("/incidents/{incident_id}")
+@router.patch("/incidents/{incident_id}", response_model=Incident)
 async def update_incident_status(
     incident_id: UUID,
     update_data: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.update_incident_status(db, current_user, incident_id, update_data)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
 
-@router.get("/logs")
+@router.get("/logs", response_model=list[SecurityLog])
 async def get_security_logs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return security_service.get_access_logs(db)
+    _require_security(current_user)
+    return security_service.get_access_logs(db, current_user.id)
 
 
-@router.get("/reports")
+@router.get("/reports", response_model=list[SecurityReport])
 async def get_security_reports(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return security_service.get_security_reports(db)
+    _require_security(current_user)
+    return security_service.get_security_reports(db, current_user.id)
 
 
-@router.post("/reports")
+@router.post("/reports", response_model=SecurityReport)
 async def generate_report(
     report_data: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _require_security(current_user)
     try:
         return security_service.generate_report(db, current_user, report_data)
     except ValueError as exc:

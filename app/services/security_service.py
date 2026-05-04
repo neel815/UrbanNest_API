@@ -49,23 +49,50 @@ def _serialize_timestamp(value: datetime | None) -> str | None:
 
 def _visitor_status_label(status: VisitorStatus) -> str:
     mapping = {
-        VisitorStatus.PENDING: "expected",
-        VisitorStatus.APPROVED: "expected",
+        VisitorStatus.PENDING: "pending",
+        VisitorStatus.APPROVED: "approved",
         VisitorStatus.CHECKED_IN: "checked_in",
         VisitorStatus.CHECKED_OUT: "checked_out",
-        VisitorStatus.DENIED: "rejected",
+        VisitorStatus.DENIED: "denied",
     }
     return mapping[status]
 
 
 def _visitor_status_db(status: str) -> VisitorStatus:
     mapping = {
-        "expected": VisitorStatus.PENDING,
+        "pending": VisitorStatus.PENDING,
+        "approved": VisitorStatus.APPROVED,
         "checked_in": VisitorStatus.CHECKED_IN,
         "checked_out": VisitorStatus.CHECKED_OUT,
-        "rejected": VisitorStatus.DENIED,
+        "denied": VisitorStatus.DENIED,
     }
     return mapping[status]
+
+
+def _get_visitor_for_security(db: Session, visitor_id: str | UUID, user_id: str | UUID) -> Visitor:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+    visitor = (
+        db.query(Visitor)
+        .options(
+            joinedload(Visitor.resident).joinedload(User.resident_profile).joinedload(ResidentProfile.unit),
+            joinedload(Visitor.approved_by_user),
+        )
+        .filter(Visitor.id == _uuid(visitor_id))
+        .first()
+    )
+    if not visitor:
+        raise ValueError("Visitor not found")
+
+    resident = visitor.resident
+    resident_profile = resident.resident_profile if resident else None
+    unit = resident_profile.unit if resident_profile else None
+    resident_building_id = unit.building_id if unit else None
+
+    if resident_building_id != building_id:
+        raise PermissionError("Access denied. Visitor does not belong to your building")
+
+    return visitor
 
 
 def _person_type_for_user(user: User | None) -> str:
@@ -230,15 +257,55 @@ def _get_security_building_id(db: Session, user_id: UUID) -> UUID:
     return profile.assigned_building_id
 
 
-def get_dashboard_stats(db: Session) -> dict:
+def get_dashboard_stats(db: Session, user_id: str | UUID) -> dict:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
     today_start = _today_start()
 
-    active_visitors = db.query(func.count(Visitor.id)).filter(Visitor.status == VisitorStatus.CHECKED_IN).scalar() or 0
-    pending_approvals = db.query(func.count(Visitor.id)).filter(Visitor.status == VisitorStatus.PENDING).scalar() or 0
-    incidents_today = db.query(func.count(Incident.id)).filter(Incident.created_at >= today_start).scalar() or 0
-    patrol_rounds = db.query(func.count(PatrolRound.id)).filter(PatrolRound.status == PatrolStatus.IN_PROGRESS).scalar() or 0
-    access_alerts = db.query(func.count(AccessLog.id)).filter(AccessLog.timestamp >= today_start).scalar() or 0
-    total_entries = db.query(func.count(AccessLog.id)).filter(AccessLog.timestamp >= today_start).scalar() or 0
+    resident_ids_query = (
+        db.query(ResidentProfile.user_id)
+        .join(ResidentProfile.unit)
+        .filter(ResidentProfile.unit_id.isnot(None), ResidentProfile.unit.has(building_id=building_id))
+    )
+
+    active_visitors = (
+        db.query(func.count(Visitor.id))
+        .filter(Visitor.resident_id.in_(resident_ids_query), Visitor.status == VisitorStatus.CHECKED_IN)
+        .scalar()
+        or 0
+    )
+    pending_approvals = (
+        db.query(func.count(Visitor.id))
+        .filter(Visitor.resident_id.in_(resident_ids_query), Visitor.status == VisitorStatus.PENDING)
+        .scalar()
+        or 0
+    )
+    incidents_today = (
+        db.query(func.count(Incident.id))
+        .filter(Incident.reported_by == parsed_user_id, Incident.created_at >= today_start)
+        .scalar()
+        or 0
+    )
+    patrol_rounds = (
+        db.query(func.count(PatrolRound.id))
+        .filter(PatrolRound.guard_id == parsed_user_id, PatrolRound.status == PatrolStatus.IN_PROGRESS)
+        .scalar()
+        or 0
+    )
+    access_alerts = (
+        db.query(func.count(AccessLog.id))
+        .join(AccessLog.access_point)
+        .filter(AccessPoint.building_id == building_id, AccessLog.timestamp >= today_start)
+        .scalar()
+        or 0
+    )
+    total_entries = (
+        db.query(func.count(AccessLog.id))
+        .join(AccessLog.access_point)
+        .filter(AccessPoint.building_id == building_id, AccessLog.timestamp >= today_start)
+        .scalar()
+        or 0
+    )
 
     return {
         "activeVisitors": active_visitors,
@@ -261,13 +328,23 @@ def get_announcements(db: Session, user_id: str | UUID) -> list[AnnouncementResp
     return [AnnouncementResponse.model_validate(record) for record in records]
 
 
-def get_visitors(db: Session) -> list[dict]:
+def get_visitors(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+
+    resident_ids_query = (
+        db.query(ResidentProfile.user_id)
+        .join(ResidentProfile.unit)
+        .filter(ResidentProfile.unit_id.isnot(None), ResidentProfile.unit.has(building_id=building_id))
+    )
+
     visitors = (
         db.query(Visitor)
         .options(
             joinedload(Visitor.resident).joinedload(User.resident_profile).joinedload(ResidentProfile.unit),
             joinedload(Visitor.approved_by_user),
         )
+        .filter(Visitor.resident_id.in_(resident_ids_query))
         .order_by(Visitor.expected_date.desc(), Visitor.created_at.desc())
         .all()
     )
@@ -325,6 +402,54 @@ def update_visitor_status(db: Session, current_user: User, visitor_id: str | UUI
     return _serialize_visitor(visitor)
 
 
+def approve_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) -> Visitor:
+    visitor = _get_visitor_for_security(db, visitor_id, user_id)
+    if visitor.status != VisitorStatus.PENDING:
+        raise ValueError("Only pending visitors can be approved")
+
+    visitor.status = VisitorStatus.APPROVED
+    visitor.approved_by = _uuid(user_id)
+    db.commit()
+    db.refresh(visitor)
+    return visitor
+
+
+def deny_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) -> Visitor:
+    visitor = _get_visitor_for_security(db, visitor_id, user_id)
+    if visitor.status != VisitorStatus.PENDING:
+        raise ValueError("Only pending visitors can be denied")
+
+    visitor.status = VisitorStatus.DENIED
+    visitor.approved_by = _uuid(user_id)
+    db.commit()
+    db.refresh(visitor)
+    return visitor
+
+
+def checkin_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) -> Visitor:
+    visitor = _get_visitor_for_security(db, visitor_id, user_id)
+    if visitor.status != VisitorStatus.APPROVED:
+        raise ValueError("Visitor must be approved before check-in")
+
+    visitor.status = VisitorStatus.CHECKED_IN
+    visitor.check_in_time = datetime.utcnow()
+    db.commit()
+    db.refresh(visitor)
+    return visitor
+
+
+def checkout_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) -> Visitor:
+    visitor = _get_visitor_for_security(db, visitor_id, user_id)
+    if visitor.status != VisitorStatus.CHECKED_IN:
+        raise ValueError("Visitor must be checked in before check-out")
+
+    visitor.status = VisitorStatus.CHECKED_OUT
+    visitor.check_out_time = datetime.utcnow()
+    db.commit()
+    db.refresh(visitor)
+    return visitor
+
+
 def get_access_points(db: Session) -> list[dict]:
     points = db.query(AccessPoint).order_by(AccessPoint.name.asc()).all()
     if not points:
@@ -351,10 +476,15 @@ def get_access_points(db: Session) -> list[dict]:
     ]
 
 
-def get_access_logs(db: Session) -> list[dict]:
+def get_access_logs(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+
     logs = (
         db.query(AccessLog)
         .options(joinedload(AccessLog.access_point), joinedload(AccessLog.user))
+        .join(AccessLog.access_point)
+        .filter(AccessPoint.building_id == building_id)
         .order_by(AccessLog.timestamp.desc())
         .all()
     )
@@ -374,25 +504,33 @@ def toggle_access_point(db: Session, point_id: str | UUID) -> dict:
     return _serialize_access_point(point, int(access_count), last_access)
 
 
-def get_patrol_rounds(db: Session) -> list[dict]:
+def get_patrol_rounds(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+
     rounds = (
         db.query(PatrolRound)
         .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route))
+        .filter(PatrolRound.guard_id == parsed_user_id)
         .order_by(PatrolRound.started_at.desc())
         .all()
     )
     return [_serialize_patrol_round(round_) for round_ in rounds]
 
 
-def get_patrol_routes(db: Session) -> list[dict]:
-    routes = db.query(PatrolRoute).order_by(PatrolRoute.name.asc()).all()
+def get_patrol_routes(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+    routes = db.query(PatrolRoute).filter(PatrolRoute.building_id == building_id).order_by(PatrolRoute.name.asc()).all()
     return [_serialize_patrol_route(route) for route in routes]
 
 
 def start_patrol_round(db: Session, current_user: User, patrol_data: dict) -> dict:
+    building_id = _get_security_building_id(db, current_user.id)
     route = db.query(PatrolRoute).filter(PatrolRoute.id == _uuid(patrol_data.get("routeId"))).first()
     if not route:
         raise ValueError("Patrol route not found")
+    if route.building_id != building_id:
+        raise ValueError("Patrol route does not belong to your building")
 
     patrol_round = PatrolRound(
         guard_id=current_user.id,
@@ -433,12 +571,20 @@ def check_checkpoint(db: Session, round_id: str | UUID, checkpoint_id: int, data
     return {"id": round_payload["id"], "checkpoints": round_payload["checkpoints"]}
 
 
-def get_incidents(db: Session) -> list[dict]:
-    incidents = db.query(Incident).options(joinedload(Incident.reporter)).order_by(Incident.created_at.desc()).all()
+def get_incidents(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+    incidents = (
+        db.query(Incident)
+        .options(joinedload(Incident.reporter))
+        .filter(Incident.reported_by == parsed_user_id)
+        .order_by(Incident.created_at.desc())
+        .all()
+    )
     return [_serialize_incident(incident) for incident in incidents]
 
 
 def create_incident(db: Session, current_user: User, payload: dict) -> dict:
+    _get_security_building_id(db, current_user.id)
     incident = Incident(
         title=payload.get("title", "").strip(),
         description=payload.get("description", "").strip(),
@@ -472,8 +618,15 @@ def update_incident_status(db: Session, current_user: User, incident_id: str | U
     return serialized
 
 
-def get_security_reports(db: Session) -> list[dict]:
-    reports = db.query(SecurityReport).options(joinedload(SecurityReport.creator)).order_by(SecurityReport.created_at.desc()).all()
+def get_security_reports(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+    reports = (
+        db.query(SecurityReport)
+        .options(joinedload(SecurityReport.creator))
+        .filter(SecurityReport.created_by == parsed_user_id)
+        .order_by(SecurityReport.created_at.desc())
+        .all()
+    )
     return [_serialize_report(report) for report in reports]
 
 
