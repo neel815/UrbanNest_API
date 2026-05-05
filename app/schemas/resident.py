@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.admin import AnnouncementPriority
 from app.models.resident import (
@@ -45,10 +45,11 @@ class AnnouncementResponse(BaseModel):
 
 
 class MaintenanceCreateRequest(BaseModel):
-    title: str
-    description: str
+    title: str = Field(min_length=2, max_length=150)
+    description: str = Field(min_length=5)
     category: MaintenanceCategory
-    priority: MaintenancePriority
+    priority: MaintenancePriority = MaintenancePriority.MEDIUM
+    photo_url: str | None = None
 
 
 class MaintenanceRequestResponse(BaseModel):
@@ -62,7 +63,11 @@ class MaintenanceRequestResponse(BaseModel):
     status: MaintenanceStatus
     resident_id: UUID
     unit_id: UUID | None
+    resident_name: str | None = None
+    unit_number: str | None = None
     photo_url: str | None
+    resolution_note: str | None
+    updated_by: UUID | None
     resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime

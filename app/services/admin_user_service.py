@@ -4,10 +4,10 @@ import secrets
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.admin import Announcement, Building, BuildingType, Unit, UnitStatus
-from app.models.resident import Event, ResidentProfile
+from app.models.resident import Event, MaintenanceRequest, MaintenanceStatus, ResidentProfile
 from app.models.security import SecurityProfile
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
@@ -19,6 +19,7 @@ from app.schemas.admin import (
     AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
     CreateManagedUserRequest,
+    MaintenanceStatusUpdateRequest,
     UnitCreateRequest,
     UnitResponse,
     UnitUpdateRequest,
@@ -27,6 +28,7 @@ from app.schemas.admin import (
     ManagedUserResponse,
     UpdateManagedUserRequest,
 )
+from app.schemas.resident import MaintenanceRequestResponse
 from app.utils.security import hash_password
 
 
@@ -86,6 +88,7 @@ def _serialize_user(user: User) -> ManagedUserResponse:
         id=str(user.id),
         full_name=user.full_name,
         email=user.email,
+        phone_number=user.phone_number,
         role=user.role.value,
         profile_image=user.profile_image,
         created_at=user.created_at.isoformat(),
@@ -262,6 +265,7 @@ def create_user_by_role(
     user = User(
         full_name=payload.full_name,
         email=payload.email,
+            phone_number=payload.phone_number,
         hashed_password=hash_password(payload.password),
         profile_image=payload.profile_image,
         role=role,
@@ -312,6 +316,7 @@ def invite_user_by_role(
     user = User(
         full_name=payload.full_name,
         email=payload.email,
+        phone_number=payload.phone_number,
         hashed_password=hash_password(secrets.token_urlsafe(20)),
         profile_image=payload.profile_image,
         role=role,
@@ -402,6 +407,7 @@ def update_user_by_role(
 
     user.full_name = payload.full_name
     user.email = payload.email
+    user.phone_number = payload.phone_number
     user.profile_image = payload.profile_image
     if payload.password:
         user.hashed_password = hash_password(payload.password)
@@ -474,6 +480,13 @@ def _serialize_event(event: Event) -> EventResponse:
     return EventResponse.model_validate(event)
 
 
+def _serialize_maintenance_request(record: MaintenanceRequest) -> MaintenanceRequestResponse:
+    response = MaintenanceRequestResponse.model_validate(record)
+    response.resident_name = record.resident.full_name if record.resident is not None else None
+    response.unit_number = record.unit.unit_number if record.unit is not None else None
+    return response
+
+
 def get_announcements(db: Session, building_id: uuid.UUID) -> list[AnnouncementResponse]:
     announcements = (
         db.query(Announcement)
@@ -513,6 +526,69 @@ def delete_announcement(db: Session, building_id: uuid.UUID, announcement_id: uu
     db.delete(announcement)
     db.commit()
     return {"message": "Announcement deleted"}
+
+
+def get_maintenance_requests(
+    db: Session,
+    building_id: uuid.UUID,
+    status_filter: MaintenanceStatus | None = None,
+) -> list[MaintenanceRequestResponse]:
+    query = (
+        db.query(MaintenanceRequest)
+        .join(Unit, Unit.id == MaintenanceRequest.unit_id)
+        .filter(Unit.building_id == building_id)
+        .options(joinedload(MaintenanceRequest.unit), joinedload(MaintenanceRequest.resident))
+        .order_by(MaintenanceRequest.created_at.desc())
+    )
+    if status_filter is not None:
+        query = query.filter(MaintenanceRequest.status == status_filter)
+    records = query.all()
+    return [_serialize_maintenance_request(record) for record in records]
+
+
+def update_maintenance_status(
+    db: Session,
+    request_id: uuid.UUID,
+    building_id: uuid.UUID,
+    admin_user_id: uuid.UUID,
+    data: MaintenanceStatusUpdateRequest,
+) -> MaintenanceRequestResponse:
+    record = db.query(MaintenanceRequest).options(joinedload(MaintenanceRequest.unit)).filter(
+        MaintenanceRequest.id == request_id
+    ).first()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance request not found")
+    if record.unit is None or record.unit.building_id != building_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Request does not belong to your building")
+
+    new_status = data.status
+    current_status = record.status
+
+    if new_status == MaintenanceStatus.IN_PROGRESS:
+        if current_status != MaintenanceStatus.OPEN:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request must be open to start work")
+    elif new_status == MaintenanceStatus.RESOLVED:
+        if current_status != MaintenanceStatus.IN_PROGRESS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request must be in progress to resolve")
+        if not data.resolution_note or not data.resolution_note.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Resolution note is required")
+        record.resolved_at = datetime.utcnow()
+        record.resolution_note = data.resolution_note.strip()
+    elif new_status == MaintenanceStatus.CANCELLED:
+        if current_status == MaintenanceStatus.RESOLVED:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Resolved requests cannot be cancelled")
+        if current_status not in {MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request cannot be cancelled")
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported maintenance status")
+
+    record.status = new_status
+    if data.resolution_note is not None and new_status != MaintenanceStatus.RESOLVED:
+        record.resolution_note = data.resolution_note.strip() or None
+    record.updated_by = admin_user_id
+    db.commit()
+    db.refresh(record)
+    return _serialize_maintenance_request(record)
 
 
 def get_events(db: Session, building_id: uuid.UUID) -> list[EventResponse]:

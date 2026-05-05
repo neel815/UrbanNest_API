@@ -26,6 +26,7 @@ class User(Base):
     )
     full_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    phone_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     profile_image: Mapped[str | None] = mapped_column(Text, nullable=True)
     must_reset_password: Mapped[bool] = mapped_column(
@@ -61,9 +62,18 @@ class User(Base):
     admin_profile = relationship("AdminProfile", back_populates="user", uselist=False)
     security_profile = relationship("SecurityProfile", back_populates="user", uselist=False)
     announcements = relationship("Announcement", back_populates="author")
-    maintenance_requests = relationship("MaintenanceRequest", back_populates="resident")
+    maintenance_requests = relationship(
+        "MaintenanceRequest",
+        back_populates="resident",
+        foreign_keys="MaintenanceRequest.resident_id",
+    )
     visitor_requests = relationship("Visitor", back_populates="resident", foreign_keys="Visitor.resident_id")
     approved_visits = relationship("Visitor", back_populates="approved_by_user", foreign_keys="Visitor.approved_by")
     payments = relationship("Payment", back_populates="resident")
+    updated_maintenance_requests = relationship(
+        "MaintenanceRequest",
+        back_populates="updated_by_user",
+        foreign_keys="MaintenanceRequest.updated_by",
+    )
     created_events = relationship("Event", back_populates="creator", foreign_keys="Event.created_by")
     forum_posts = relationship("ForumPost", back_populates="author", foreign_keys="ForumPost.author_id")

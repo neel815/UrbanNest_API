@@ -173,10 +173,30 @@ def create_maintenance_request(db: Session, user_id: UUID | str, data: Maintenan
         description=data.description,
         category=data.category,
         priority=data.priority,
+        photo_url=data.photo_url,
+        status=MaintenanceStatus.OPEN,
         resident_id=parsed_user_id,
         unit_id=profile.unit_id,
     )
     db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _to_maintenance_response(record)
+
+
+def cancel_maintenance_request(db: Session, user_id: UUID | str, request_id: UUID | str) -> MaintenanceRequestResponse:
+    parsed_user_id = UUID(str(user_id))
+    parsed_request_id = UUID(str(request_id))
+    record = db.query(MaintenanceRequest).filter(MaintenanceRequest.id == parsed_request_id).first()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Maintenance request not found")
+    if record.resident_id != parsed_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only cancel your own request")
+    if record.status != MaintenanceStatus.OPEN:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only open requests can be cancelled")
+
+    record.status = MaintenanceStatus.CANCELLED
+    record.updated_by = parsed_user_id
     db.commit()
     db.refresh(record)
     return _to_maintenance_response(record)

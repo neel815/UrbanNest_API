@@ -24,6 +24,7 @@ from app.services.resident_service import (
     create_forum_post,
     create_maintenance_request,
     create_visitor,
+    cancel_maintenance_request,
     get_announcements,
     get_dashboard_stats,
     get_events,
@@ -84,6 +85,16 @@ async def create_maintenance_request_endpoint(
 ) -> MaintenanceRequestResponse:
     require_resident(current_user)
     return create_maintenance_request(db, current_user.id, request)
+
+
+@router.patch("/maintenance/{request_id}/cancel")
+async def cancel_maintenance_request_endpoint(
+    request_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestResponse:
+    require_resident(current_user)
+    return cancel_maintenance_request(db, current_user.id, request_id)
 
 
 @router.get("/visitors")

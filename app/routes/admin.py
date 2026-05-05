@@ -13,6 +13,8 @@ from app.schemas.admin import (
     EventCreateRequest,
     EventResponse,
     CreateManagedUserRequest,
+    MaintenanceResolveRequest,
+    MaintenanceStatusUpdateRequest,
     UnitCreateRequest,
     UnitResponse,
     UnitUpdateRequest,
@@ -34,15 +36,19 @@ from app.services.admin_user_service import (
     get_admin_building_info,
     get_admin_building_id,
     get_announcements,
+    get_maintenance_requests,
     get_events,
     invite_user_by_role,
     list_users_by_role,
     list_units_for_building,
     require_admin,
+    update_maintenance_status,
     update_user_by_role,
     update_unit_for_building,
 )
 from app.services.auth_service import get_current_user
+from app.models.resident import MaintenanceStatus
+from app.schemas.resident import MaintenanceRequestResponse
 
 router = APIRouter()
 
@@ -97,6 +103,69 @@ def remove_admin_announcement(
     require_admin(current_user)
     building_id = get_admin_building_id(db, current_user.id)
     return delete_announcement(db, building_id, announcement_id)
+
+
+@router.get("/maintenance", response_model=list[MaintenanceRequestResponse])
+def list_maintenance_requests(
+    status: MaintenanceStatus | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[MaintenanceRequestResponse]:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_maintenance_requests(db, building_id, status)
+
+
+@router.patch("/maintenance/{request_id}/start", response_model=MaintenanceRequestResponse)
+def start_maintenance_request(
+    request_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return update_maintenance_status(
+        db,
+        request_id,
+        building_id,
+        current_user.id,
+        MaintenanceStatusUpdateRequest(status=MaintenanceStatus.IN_PROGRESS),
+    )
+
+
+@router.patch("/maintenance/{request_id}/resolve", response_model=MaintenanceRequestResponse)
+def resolve_maintenance_request(
+    request_id: UUID,
+    payload: MaintenanceResolveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return update_maintenance_status(
+        db,
+        request_id,
+        building_id,
+        current_user.id,
+        MaintenanceStatusUpdateRequest(status=MaintenanceStatus.RESOLVED, resolution_note=payload.resolution_note),
+    )
+
+
+@router.patch("/maintenance/{request_id}/cancel", response_model=MaintenanceRequestResponse)
+def cancel_maintenance_request(
+    request_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> MaintenanceRequestResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return update_maintenance_status(
+        db,
+        request_id,
+        building_id,
+        current_user.id,
+        MaintenanceStatusUpdateRequest(status=MaintenanceStatus.CANCELLED),
+    )
 
 
 @router.get("/events", response_model=list[EventResponse])

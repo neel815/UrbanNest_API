@@ -4,7 +4,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.admin import AnnouncementPriority, BuildingType, UnitStatus
-from app.models.resident import ForumPostCategory
+from app.models.resident import ForumPostCategory, MaintenanceStatus
+from app.schemas.resident import MaintenanceRequestResponse
 
 
 class AdminDashboardStatsResponse(BaseModel):
@@ -26,6 +27,7 @@ class AdminBuildingInfoResponse(BaseModel):
 class InviteManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
+    phone_number: str | None = Field(default=None, max_length=30)
     profile_image: str | None = None
     unit_id: str | None = None
 
@@ -39,6 +41,7 @@ class ManagedUserResponse(BaseModel):
     id: str
     full_name: str
     email: EmailStr
+    phone_number: str | None = None
     role: str
     profile_image: str | None = None
     created_at: str
@@ -47,6 +50,7 @@ class ManagedUserResponse(BaseModel):
 class CreateManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
+    phone_number: str | None = Field(default=None, max_length=30)
     password: str = Field(min_length=8)
     profile_image: str | None = None
     unit_id: str | None = None
@@ -55,6 +59,7 @@ class CreateManagedUserRequest(BaseModel):
 class UpdateManagedUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
     email: EmailStr
+    phone_number: str | None = Field(default=None, max_length=30)
     profile_image: str | None = None
     password: str | None = Field(default=None, min_length=8)
 
@@ -109,6 +114,15 @@ class AnnouncementResponse(BaseModel):
     published_at: datetime
     created_at: datetime
     updated_at: datetime
+
+
+class MaintenanceStatusUpdateRequest(BaseModel):
+    status: MaintenanceStatus
+    resolution_note: str | None = None
+
+
+class MaintenanceResolveRequest(BaseModel):
+    resolution_note: str = Field(min_length=1)
 
 
 class EventCreateRequest(BaseModel):

@@ -154,6 +154,13 @@ class MaintenanceRequest(Base):
         index=True,
     )
     photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -170,6 +177,7 @@ class MaintenanceRequest(Base):
     )
 
     resident = relationship("User", back_populates="maintenance_requests", foreign_keys=[resident_id])
+    updated_by_user = relationship("User", back_populates="updated_maintenance_requests", foreign_keys=[updated_by])
     unit = relationship("Unit", back_populates="maintenance_requests")
 
 
