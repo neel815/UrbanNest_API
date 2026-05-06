@@ -59,7 +59,12 @@ class User(Base):
     )
 
     resident_profile = relationship("ResidentProfile", back_populates="user", uselist=False)
-    admin_profile = relationship("AdminProfile", back_populates="user", uselist=False)
+    admin_profile = relationship(
+        "AdminProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     security_profile = relationship("SecurityProfile", back_populates="user", uselist=False)
     announcements = relationship("Announcement", back_populates="author")
     maintenance_requests = relationship(

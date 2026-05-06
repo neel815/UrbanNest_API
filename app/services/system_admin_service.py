@@ -237,6 +237,9 @@ def delete_admin(admin_id: str, db: Session) -> dict:
     if not admin:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found")
 
+    if admin.admin_profile is not None:
+        db.delete(admin.admin_profile)
+
     db.delete(admin)
     db.commit()
     return {"message": "Admin deleted"}

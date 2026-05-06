@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -222,3 +222,30 @@ class ResidentListResponse(BaseModel):
     id: str
     full_name: str
     unit_number: str | None = None
+
+
+class AdminResidentDetailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    full_name: str
+    email: str
+    profile_image: str | None = None
+    unit_number: str | None = None
+    floor: int | None = None
+    plot_number: str | None = None
+    building_name: str | None = None
+    move_in_date: date | None = None
+    lease_end_date: date | None = None
+    emergency_contact_name: str | None = None
+    emergency_contact_phone: str | None = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    total_maintenance_requests: int
+    open_maintenance_requests: int
+    total_payments: int
+    pending_payments: int
+    total_visitors: int

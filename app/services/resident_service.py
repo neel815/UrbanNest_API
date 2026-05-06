@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -29,7 +29,9 @@ from app.schemas.resident import (
     MaintenanceCreateRequest,
     MaintenanceRequestResponse,
     PaymentResponse,
+    ResidentProfileResponse,
     ResidentProfileSummary,
+    ResidentProfileUpdateRequest,
     VisitorCreateRequest,
     VisitorResponse,
     VisitorUpdateRequest,
@@ -42,15 +44,19 @@ def require_resident(user: User) -> None:
 
 
 def _get_resident_profile_entity(db: Session, user_id: UUID) -> ResidentProfile:
-    profile = (
+    profile = _get_resident_profile_entity_optional(db, user_id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident profile not found")
+    return profile
+
+
+def _get_resident_profile_entity_optional(db: Session, user_id: UUID) -> ResidentProfile | None:
+    return (
         db.query(ResidentProfile)
         .options(joinedload(ResidentProfile.unit).joinedload(Unit.building))
         .filter(ResidentProfile.user_id == user_id)
         .first()
     )
-    if profile is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident profile not found")
-    return profile
 
 
 def _get_resident_building_id(db: Session, user_id: UUID) -> UUID | None:
@@ -92,16 +98,66 @@ def _to_forum_post_response(record: ForumPost) -> ForumPostResponse:
     return ForumPostResponse.model_validate(record)
 
 
-def get_resident_profile(db: Session, user_id: UUID | str) -> ResidentProfileSummary:
-    profile = _get_resident_profile_entity(db, UUID(str(user_id)))
-    unit = profile.unit
-    building_name = unit.building.name if unit and unit.building else None
+def _to_resident_profile_response(user: User, profile: ResidentProfile | None) -> ResidentProfileResponse:
+    unit = profile.unit if profile else None
+    building = unit.building if unit else None
+    status = "active" if profile else "inactive"
 
-    return ResidentProfileSummary(
-        full_name=profile.user.full_name,
+    return ResidentProfileResponse(
+        id=profile.id if profile else user.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        email=user.email,
+        profile_image=user.profile_image,
         unit_number=unit.unit_number if unit else None,
-        building_name=building_name,
+        floor=unit.floor if unit else None,
+        plot_number=unit.plot_number if unit else None,
+        building_name=building.name if building else None,
+        move_in_date=profile.move_in_date.date() if profile and profile.move_in_date else None,
+        lease_end_date=profile.move_out_date.date() if profile and profile.move_out_date else None,
+        emergency_contact_name=profile.emergency_contact_name if profile else None,
+        emergency_contact_phone=profile.emergency_contact_phone if profile else None,
+        status=status,
+        created_at=profile.created_at if profile else user.created_at,
+        updated_at=profile.updated_at if profile else user.updated_at,
     )
+
+
+def get_resident_profile(db: Session, user_id: UUID | str) -> ResidentProfileResponse:
+    parsed_user_id = UUID(str(user_id))
+    user = db.query(User).filter(User.id == parsed_user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident not found")
+
+    profile = _get_resident_profile_entity_optional(db, parsed_user_id)
+    return _to_resident_profile_response(user, profile)
+
+
+def update_resident_profile(db: Session, user_id: UUID | str, data: ResidentProfileUpdateRequest) -> ResidentProfileResponse:
+    parsed_user_id = UUID(str(user_id))
+    user = db.query(User).filter(User.id == parsed_user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident not found")
+
+    profile = _get_resident_profile_entity(db, parsed_user_id)
+    if profile is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    if data.full_name is not None:
+        user.full_name = data.full_name
+    if data.emergency_contact_name is not None:
+        profile.emergency_contact_name = data.emergency_contact_name
+    if data.emergency_contact_phone is not None:
+        profile.emergency_contact_phone = data.emergency_contact_phone
+    if data.move_in_date is not None:
+        profile.move_in_date = datetime.combine(data.move_in_date, time.min, tzinfo=timezone.utc)
+    if data.lease_end_date is not None:
+        profile.move_out_date = datetime.combine(data.lease_end_date, time.min, tzinfo=timezone.utc)
+
+    db.commit()
+    db.refresh(user)
+    db.refresh(profile)
+    return _to_resident_profile_response(user, profile)
 
 
 def get_dashboard_stats(db: Session, user_id: UUID | str) -> DashboardStats:

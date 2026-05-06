@@ -25,6 +25,7 @@ from app.schemas.admin import (
     InviteManagedUserRequest,
     InviteManagedUserResponse,
     ManagedUserResponse,
+    AdminResidentDetailResponse,
     UpdateManagedUserRequest,
     SecurityOverviewResponse,
 )
@@ -45,6 +46,7 @@ from app.services.admin_user_service import (
     get_events,
     get_payments,
     get_residents,
+    get_resident_detail,
     invite_user_by_role,
     list_users_by_role,
     list_units_for_building,
@@ -58,6 +60,7 @@ from app.services.admin_user_service import (
     update_user_by_role,
     update_unit_for_building,
 )
+from app.services.scheduler_service import mark_overdue_payments
 from app.services.auth_service import get_current_user
 from app.models.resident import MaintenanceStatus
 from app.schemas.resident import MaintenanceRequestResponse
@@ -220,6 +223,17 @@ def list_residents(
     require_admin(current_user)
     building_id = get_admin_building_id(db, current_user.id)
     return list_users_by_role(UserRole.RESIDENT, db, building_id)
+
+
+@router.get("/residents/detail/{resident_id}", response_model=AdminResidentDetailResponse)
+def get_resident_detail_endpoint(
+    resident_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AdminResidentDetailResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_resident_detail(db, building_id, resident_id)
 
 
 @router.post("/residents", response_model=ManagedUserResponse, status_code=status.HTTP_201_CREATED)
@@ -396,6 +410,16 @@ def list_payments(
     require_admin(current_user)
     building_id = get_admin_building_id(db, current_user.id)
     return get_payments(db, building_id)
+
+
+# TESTING ONLY — Remove before production
+@router.post("/payments/trigger-overdue-check")
+def trigger_overdue_check(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    require_admin(current_user)
+    mark_overdue_payments()
+    return {"message": "Overdue check completed"}
 
 
 @router.get("/residents")

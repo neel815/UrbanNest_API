@@ -14,7 +14,8 @@ from app.schemas.resident import (
     MaintenanceCreateRequest,
     MaintenanceRequestResponse,
     PaymentResponse,
-    ResidentProfileSummary,
+    ResidentProfileResponse,
+    ResidentProfileUpdateRequest,
     VisitorCreateRequest,
     VisitorResponse,
     VisitorUpdateRequest,
@@ -36,6 +37,7 @@ from app.services.resident_service import (
     pay_payment,
     require_resident,
     update_visitor_status,
+    update_resident_profile,
 )
 
 router = APIRouter()
@@ -45,9 +47,19 @@ router = APIRouter()
 async def get_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> ResidentProfileSummary:
+) -> ResidentProfileResponse:
     require_resident(current_user)
     return get_resident_profile(db, current_user.id)
+
+
+@router.patch("/profile")
+async def update_profile(
+    payload: ResidentProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResidentProfileResponse:
+    require_resident(current_user)
+    return update_resident_profile(db, current_user.id, payload)
 
 
 @router.get("/dashboard-stats")

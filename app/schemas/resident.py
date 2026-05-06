@@ -158,8 +158,11 @@ class ForumPostResponse(BaseModel):
 
 
 class ResidentProfileUpdateRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=100)
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
+    move_in_date: date | None = None
+    lease_end_date: date | None = None
 
 
 class ResidentProfileResponse(BaseModel):
@@ -167,9 +170,17 @@ class ResidentProfileResponse(BaseModel):
 
     id: UUID
     user_id: UUID
-    unit_id: UUID | None
-    move_in_date: datetime | None
+    full_name: str
+    email: str
+    profile_image: str | None = None
+    unit_number: str | None = None
+    floor: int | None = None
+    plot_number: str | None = None
+    building_name: str | None = None
+    move_in_date: date | None = None
+    lease_end_date: date | None = None
     emergency_contact_name: str | None
     emergency_contact_phone: str | None
+    status: str
     created_at: datetime
     updated_at: datetime

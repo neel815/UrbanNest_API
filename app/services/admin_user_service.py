@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.admin import Announcement, Building, BuildingType, Unit, UnitStatus
-from app.models.resident import Event, MaintenanceRequest, MaintenanceStatus, ResidentProfile
+from app.models.resident import Event, MaintenanceRequest, MaintenanceStatus, Payment, PaymentStatus, ResidentProfile, Visitor
 from app.models.security import SecurityProfile
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
@@ -27,6 +27,7 @@ from app.schemas.admin import (
     InviteManagedUserRequest,
     InviteManagedUserResponse,
     ManagedUserResponse,
+    AdminResidentDetailResponse,
     UpdateManagedUserRequest,
 )
 from app.schemas.resident import MaintenanceRequestResponse
@@ -312,6 +313,110 @@ def list_users_by_role(role: UserRole, db: Session, building_id: uuid.UUID | Non
 
     users = db.query(User).filter(User.role == role).order_by(User.created_at.desc()).all()
     return [_serialize_user(user) for user in users]
+
+
+def _resident_detail_response(
+    user: User,
+    profile: ResidentProfile,
+    total_maintenance_requests: int,
+    open_maintenance_requests: int,
+    total_payments: int,
+    pending_payments: int,
+    total_visitors: int,
+) -> AdminResidentDetailResponse:
+    unit = profile.unit
+    building = unit.building if unit else None
+    status = "active" if profile else "inactive"
+
+    return AdminResidentDetailResponse(
+        id=profile.id,
+        user_id=user.id,
+        full_name=user.full_name,
+        email=user.email,
+        profile_image=user.profile_image,
+        unit_number=unit.unit_number if unit else None,
+        floor=unit.floor if unit else None,
+        plot_number=unit.plot_number if unit else None,
+        building_name=building.name if building else None,
+        move_in_date=profile.move_in_date.date() if profile.move_in_date else None,
+        lease_end_date=profile.move_out_date.date() if profile.move_out_date else None,
+        emergency_contact_name=profile.emergency_contact_name,
+        emergency_contact_phone=profile.emergency_contact_phone,
+        status=status,
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+        total_maintenance_requests=total_maintenance_requests,
+        open_maintenance_requests=open_maintenance_requests,
+        total_payments=total_payments,
+        pending_payments=pending_payments,
+        total_visitors=total_visitors,
+    )
+
+
+def get_resident_detail(db: Session, building_id: uuid.UUID, resident_user_id: str) -> AdminResidentDetailResponse:
+    try:
+        parsed_user_id = uuid.UUID(resident_user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid resident id") from exc
+
+    profile = (
+        db.query(ResidentProfile)
+        .options(joinedload(ResidentProfile.unit).joinedload(Unit.building))
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .filter(ResidentProfile.user_id == parsed_user_id, Unit.building_id == building_id)
+        .first()
+    )
+    if profile is None:
+        existing_profile = (
+            db.query(ResidentProfile)
+            .join(Unit, Unit.id == ResidentProfile.unit_id, isouter=True)
+            .filter(ResidentProfile.user_id == parsed_user_id)
+            .first()
+        )
+        if existing_profile is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident not found")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Resident belongs to a different building")
+
+    user = db.query(User).filter(User.id == parsed_user_id, User.role == UserRole.RESIDENT).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident not found")
+
+    total_maintenance_requests = (
+        db.query(func.count(MaintenanceRequest.id))
+        .join(Unit, Unit.id == MaintenanceRequest.unit_id, isouter=True)
+        .filter(MaintenanceRequest.resident_id == parsed_user_id, Unit.building_id == building_id)
+        .scalar()
+        or 0
+    )
+    open_maintenance_requests = (
+        db.query(func.count(MaintenanceRequest.id))
+        .join(Unit, Unit.id == MaintenanceRequest.unit_id, isouter=True)
+        .filter(
+            MaintenanceRequest.resident_id == parsed_user_id,
+            Unit.building_id == building_id,
+            MaintenanceRequest.status.in_([MaintenanceStatus.OPEN, MaintenanceStatus.IN_PROGRESS]),
+        )
+        .scalar()
+        or 0
+    )
+    total_payments = db.query(func.count(Payment.id)).filter(Payment.resident_id == parsed_user_id).scalar() or 0
+    pending_payments = (
+        db.query(func.count(Payment.id))
+        .filter(Payment.resident_id == parsed_user_id, Payment.status.in_([PaymentStatus.PENDING, PaymentStatus.OVERDUE]))
+        .scalar()
+        or 0
+    )
+    total_visitors = db.query(func.count(Visitor.id)).filter(Visitor.resident_id == parsed_user_id).scalar() or 0
+
+    return _resident_detail_response(
+        user,
+        profile,
+        total_maintenance_requests,
+        open_maintenance_requests,
+        total_payments,
+        pending_payments,
+        total_visitors,
+    )
 
 
 def create_user_by_role(

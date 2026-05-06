@@ -1,7 +1,16 @@
+import logging
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import admin, auth, health, system_admin, resident, security
 from app.config import settings
+from app.services.scheduler_service import mark_overdue_payments
+
+logger = logging.getLogger(__name__)
+
+scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
 app = FastAPI(
     title=settings.API_TITLE,
@@ -26,6 +35,26 @@ app.include_router(system_admin.router, prefix="/api/system-admin", tags=["Syste
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(resident.router, prefix="/api/resident", tags=["Resident"])
 app.include_router(security.router, prefix="/api/security", tags=["Security"])
+
+
+@app.on_event("startup")
+async def start_scheduler() -> None:
+    if not scheduler.running:
+        scheduler.add_job(
+            func=mark_overdue_payments,
+            trigger=CronTrigger(hour=0, minute=0, timezone="Asia/Kolkata"),
+            id="mark_overdue_payments",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info("Scheduler started: overdue payment job scheduled daily at midnight IST")
+
+
+@app.on_event("shutdown")
+async def stop_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown()
+        logger.info("Scheduler stopped")
 
 @app.get("/")
 async def root():
