@@ -15,6 +15,10 @@ from app.schemas.admin import (
     CreateManagedUserRequest,
     MaintenanceResolveRequest,
     MaintenanceStatusUpdateRequest,
+    MarkPaymentPaidRequest,
+    RaiseBulkDueRequest,
+    RaiseIndividualDueRequest,
+    ResidentListResponse,
     UnitCreateRequest,
     UnitResponse,
     UnitUpdateRequest,
@@ -22,6 +26,7 @@ from app.schemas.admin import (
     InviteManagedUserResponse,
     ManagedUserResponse,
     UpdateManagedUserRequest,
+    SecurityOverviewResponse,
 )
 from app.services.admin_user_service import (
     create_announcement,
@@ -38,9 +43,16 @@ from app.services.admin_user_service import (
     get_announcements,
     get_maintenance_requests,
     get_events,
+    get_payments,
+    get_residents,
     invite_user_by_role,
     list_users_by_role,
     list_units_for_building,
+    get_security_overview,
+    mark_payment_paid,
+    raise_bulk_due,
+    raise_individual_due,
+    waive_payment,
     require_admin,
     update_maintenance_status,
     update_user_by_role,
@@ -309,6 +321,16 @@ def list_security(
     return list_users_by_role(UserRole.SECURITY, db, building_id)
 
 
+@router.get("/security/stats", response_model=SecurityOverviewResponse)
+def security_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> object:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_security_overview(db, building_id)
+
+
 @router.post("/security", response_model=ManagedUserResponse, status_code=status.HTTP_201_CREATED)
 def create_security(
     payload: CreateManagedUserRequest,
@@ -352,3 +374,85 @@ def delete_security(
     require_admin(current_user)
     building_id = get_admin_building_id(db, current_user.id)
     return delete_user_by_role(user_id, UserRole.SECURITY, db, building_id)
+
+
+@router.patch("/payments/{payment_id}/mark-paid", status_code=status.HTTP_200_OK)
+def mark_payment_as_received(
+    payment_id: str,
+    payload: MarkPaymentPaidRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return mark_payment_paid(db, building_id, payment_id, payload.notes)
+
+
+@router.get("/payments")
+def list_payments(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_payments(db, building_id)
+
+
+@router.get("/residents")
+def list_residents(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_residents(db, building_id)
+
+
+@router.post("/payments/bulk", status_code=status.HTTP_201_CREATED)
+def raise_bulk_payment(
+    payload: RaiseBulkDueRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return raise_bulk_due(
+        db,
+        building_id,
+        current_user.id,
+        payload.type,
+        payload.amount,
+        payload.due_date,
+        payload.description,
+    )
+
+
+@router.post("/payments/individual", status_code=status.HTTP_201_CREATED)
+def raise_individual_payment(
+    payload: RaiseIndividualDueRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return raise_individual_due(
+        db,
+        building_id,
+        current_user.id,
+        payload.resident_id,
+        payload.type,
+        payload.amount,
+        payload.due_date,
+        payload.description,
+    )
+
+
+@router.patch("/payments/{payment_id}/waive", status_code=status.HTTP_200_OK)
+def waive_payment_endpoint(
+    payment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return waive_payment(db, building_id, payment_id)

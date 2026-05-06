@@ -18,6 +18,14 @@ class AdminDashboardStatsResponse(BaseModel):
     building_name: str | None = None
 
 
+class SecurityOverviewResponse(BaseModel):
+    total_security: int
+    on_duty_now: int
+    active_shifts: int
+    building_id: str | None = None
+    building_name: str | None = None
+
+
 class AdminBuildingInfoResponse(BaseModel):
     building_id: str
     building_name: str
@@ -45,6 +53,8 @@ class ManagedUserResponse(BaseModel):
     role: str
     profile_image: str | None = None
     created_at: str
+    must_reset_password: bool | None = None
+    is_active: bool | None = None
 
 
 class CreateManagedUserRequest(BaseModel):
@@ -187,3 +197,28 @@ class ForumPostResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class MarkPaymentPaidRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=255)
+
+
+class RaiseBulkDueRequest(BaseModel):
+    type: str = Field(min_length=1, max_length=50)
+    amount: float = Field(gt=0)
+    due_date: str
+    description: str | None = Field(default=None, max_length=500)
+
+
+class RaiseIndividualDueRequest(BaseModel):
+    resident_id: str
+    type: str = Field(min_length=1, max_length=50)
+    amount: float = Field(gt=0)
+    due_date: str
+    description: str | None = Field(default=None, max_length=500)
+
+
+class ResidentListResponse(BaseModel):
+    id: str
+    full_name: str
+    unit_number: str | None = None

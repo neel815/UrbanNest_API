@@ -1,5 +1,6 @@
 import secrets
 from datetime import datetime, timedelta, timezone
+import logging
 
 from fastapi import HTTPException, status
 from sqlalchemy import distinct, func
@@ -22,9 +23,12 @@ from app.schemas.system_admin import (
     UserSummary,
 )
 from app.utils.security import hash_password
+from app.services.email_service import send_admin_invite, send_resident_invite, send_security_invite
 
 import uuid
 APP_SETTINGS = {"app_name": "UrbanNest"}
+
+logger = logging.getLogger(__name__)
 
 
 def require_system_admin(current_user: User) -> None:
@@ -196,6 +200,25 @@ def invite_admin(payload: AdminInviteRequest, db: Session) -> AdminInviteRespons
     db.commit()
 
     reset_link = f"http://localhost:3000/reset-password?token={reset_token}"
+    
+    # Get building name if assigned
+    building_name = "UrbanNest"
+    if payload.building_id:
+        building = db.query(Building).filter(Building.id == payload.building_id).first()
+        if building:
+            building_name = building.name
+    
+    # Send invitation email
+    try:
+        send_admin_invite(
+            to_email=payload.email,
+            to_name=payload.full_name,
+            building_name=building_name,
+            setup_link=reset_link,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send admin invite email: {str(e)}")
+    
     return AdminInviteResponse(message="Admin created and reset link generated", reset_link=reset_link)
 
 

@@ -38,3 +38,7 @@ class UpdateProfileRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str = Field(min_length=8)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr

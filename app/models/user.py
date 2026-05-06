@@ -69,7 +69,16 @@ class User(Base):
     )
     visitor_requests = relationship("Visitor", back_populates="resident", foreign_keys="Visitor.resident_id")
     approved_visits = relationship("Visitor", back_populates="approved_by_user", foreign_keys="Visitor.approved_by")
-    payments = relationship("Payment", back_populates="resident")
+    payments = relationship(
+        "Payment",
+        back_populates="resident",
+        foreign_keys="Payment.resident_id",
+    )
+    created_payments = relationship(
+        "Payment",
+        back_populates="created_by_user",
+        foreign_keys="Payment.created_by",
+    )
     updated_maintenance_requests = relationship(
         "MaintenanceRequest",
         back_populates="updated_by_user",

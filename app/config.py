@@ -27,6 +27,17 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
     
+    # Frontend
+    FRONTEND_URL: str = "http://localhost:3000"
+    
+    # Email (SMTP)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_USE_TLS: bool = True
+    
     @property
     def DATABASE_URL(self) -> str:
         return f"postgresql://postgres:root%40123@127.0.0.1:5432/urbannest_db"

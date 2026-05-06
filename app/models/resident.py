@@ -267,6 +267,12 @@ class Payment(Base):
     paid_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     transaction_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -282,6 +288,7 @@ class Payment(Base):
     )
 
     resident = relationship("User", back_populates="payments", foreign_keys=[resident_id])
+    created_by_user = relationship("User", foreign_keys=[created_by], back_populates="created_payments")
 
 
 class Event(Base):

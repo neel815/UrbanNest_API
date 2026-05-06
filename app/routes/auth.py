@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     AuthResponse,
+    ForgotPasswordRequest,
     LoginRequest,
     MeResponse,
     RegisterRequest,
@@ -18,6 +19,7 @@ from app.services.auth_service import (
     login_user,
     register_user,
     reset_password_user,
+    request_password_reset,
     update_current_user_profile,
 )
 
@@ -32,6 +34,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
 @router.post("/auth/reset-password")
 def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict:
     return reset_password_user(payload, db)
+
+
+@router.post("/auth/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> dict:
+    return request_password_reset(payload.email, db)
 
 
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

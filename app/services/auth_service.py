@@ -1,5 +1,7 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import secrets
+import logging
 
 from fastapi import Depends, Header, HTTPException, status
 from jose import JWTError, jwt
@@ -18,6 +20,9 @@ from app.schemas.auth import (
     UpdateProfileRequest,
 )
 from app.utils.security import create_access_token, hash_password, verify_password
+from app.services.email_service import send_password_reset
+
+logger = logging.getLogger(__name__)
 
 
 def extract_token(authorization: str | None) -> str:
@@ -131,6 +136,36 @@ def reset_password_user(payload: ResetPasswordRequest, db: Session) -> dict:
     user.reset_token_expires_at = None
     db.commit()
     return {"message": "Password set successfully"}
+
+
+def request_password_reset(email: str, db: Session) -> dict:
+    """Generate a password reset token and send reset email."""
+    user = db.query(User).filter(User.email == email).first()
+    
+    if not user:
+        # For security, don't reveal if email exists or not
+        return {"message": "If an account with that email exists, a reset link has been sent."}
+    
+    # Generate reset token
+    reset_token = secrets.token_urlsafe(32)
+    user.reset_token = reset_token
+    user.reset_token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db.commit()
+    
+    # Build reset link
+    reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
+    
+    # Send password reset email
+    try:
+        send_password_reset(
+            to_email=user.email,
+            to_name=user.full_name,
+            reset_link=reset_link,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send password reset email: {str(e)}")
+    
+    return {"message": "If an account with that email exists, a reset link has been sent."}
 
 
 def register_user(

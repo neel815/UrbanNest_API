@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 import secrets
+import logging
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -30,8 +31,10 @@ from app.schemas.admin import (
 )
 from app.schemas.resident import MaintenanceRequestResponse
 from app.utils.security import hash_password
+from app.services.email_service import send_resident_invite, send_security_invite
 
 
+logger = logging.getLogger(__name__)
 def require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
@@ -83,6 +86,46 @@ def get_admin_dashboard_stats(db: Session, building_id: uuid.UUID | None = None)
     )
 
 
+def get_security_overview(db: Session, building_id: uuid.UUID | None = None):
+    """Return security overview counts for admin dashboard."""
+    base_query = db
+    total_query = base_query.query(func.count(SecurityProfile.id))
+    on_duty_query = base_query.query(func.count(SecurityProfile.id))
+    active_shifts_query = base_query.query(func.count(func.distinct(SecurityProfile.shift)))
+
+    if building_id is not None:
+        total_query = total_query.filter(SecurityProfile.assigned_building_id == building_id)
+        on_duty_query = on_duty_query.filter(SecurityProfile.assigned_building_id == building_id)
+        active_shifts_query = active_shifts_query.filter(SecurityProfile.assigned_building_id == building_id)
+
+    total_security = total_query.scalar() or 0
+    # Only count guards who are active and have completed the invited reset (must_reset_password == False)
+    on_duty_now = (
+        on_duty_query.join(User, User.id == SecurityProfile.user_id)
+        .filter(SecurityProfile.is_active == True, User.must_reset_password == False)
+        .scalar()
+        or 0
+    )
+    active_shifts = (
+        active_shifts_query.join(User, User.id == SecurityProfile.user_id)
+        .filter(SecurityProfile.is_active == True, User.must_reset_password == False)
+        .scalar()
+        or 0
+    )
+
+    building_name = None
+    if building_id is not None:
+        building_name = db.query(Building.name).filter(Building.id == building_id).scalar()
+
+    return {
+        'total_security': total_security,
+        'on_duty_now': on_duty_now,
+        'active_shifts': active_shifts,
+        'building_id': str(building_id) if building_id is not None else None,
+        'building_name': building_name,
+    }
+
+
 def _serialize_user(user: User) -> ManagedUserResponse:
     return ManagedUserResponse(
         id=str(user.id),
@@ -92,6 +135,8 @@ def _serialize_user(user: User) -> ManagedUserResponse:
         role=user.role.value,
         profile_image=user.profile_image,
         created_at=user.created_at.isoformat(),
+        must_reset_password=user.must_reset_password,
+        is_active=None,
     )
 
 
@@ -247,7 +292,23 @@ def list_users_by_role(role: UserRole, db: Session, building_id: uuid.UUID | Non
         if building_id is not None:
             query = query.filter(SecurityProfile.assigned_building_id == building_id)
         profiles = query.order_by(User.created_at.desc()).all()
-        return [_serialize_user(profile.user) for profile in profiles]
+        # Include is_active from the security profile so frontend can render pending/active status
+        result: list[ManagedUserResponse] = []
+        for profile in profiles:
+            user_model = profile.user
+            serialized = ManagedUserResponse(
+                id=str(user_model.id),
+                full_name=user_model.full_name,
+                email=user_model.email,
+                phone_number=user_model.phone_number,
+                role=user_model.role.value,
+                profile_image=user_model.profile_image,
+                created_at=user_model.created_at.isoformat(),
+                must_reset_password=user_model.must_reset_password,
+                is_active=profile.is_active,
+            )
+            result.append(serialized)
+        return result
 
     users = db.query(User).filter(User.role == role).order_by(User.created_at.desc()).all()
     return [_serialize_user(user) for user in users]
@@ -355,6 +416,42 @@ def invite_user_by_role(
     db.commit()
 
     reset_link = f"http://localhost:3000/reset-password?token={reset_token}"
+    
+    # Send invitation email based on role
+    try:
+        if role == UserRole.RESIDENT:
+            # Get unit and building info for resident email
+            unit = db.query(Unit).filter(Unit.id == uuid.UUID(payload.unit_id)).first()
+            building = db.query(Building).filter(Building.id == building_id).first() if building_id else None
+            
+            unit_number = unit.unit_number if unit else "Unassigned"
+            building_name = building.name if building else "UrbanNest"
+            
+            send_resident_invite(
+                to_email=payload.email,
+                to_name=payload.full_name,
+                building_name=building_name,
+                unit_number=unit_number,
+                setup_link=reset_link,
+            )
+        elif role == UserRole.SECURITY:
+            # Get building info and shift for security email
+            building = db.query(Building).filter(Building.id == building_id).first() if building_id else None
+            security_profile = db.query(SecurityProfile).filter(SecurityProfile.user_id == user.id).first()
+            
+            building_name = building.name if building else "UrbanNest"
+            shift = security_profile.shift if security_profile and security_profile.shift else "To be assigned"
+            
+            send_security_invite(
+                to_email=payload.email,
+                to_name=payload.full_name,
+                building_name=building_name,
+                shift=shift,
+                setup_link=reset_link,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to send invitation email for {role.value}: {str(e)}")
+    
     return InviteManagedUserResponse(
         message=f"{role.value.replace('_', ' ').title()} invited successfully",
         reset_link=reset_link,
@@ -632,3 +729,242 @@ def delete_event(db: Session, building_id: uuid.UUID, event_id: uuid.UUID) -> di
     event.is_active = False
     db.commit()
     return {"message": "Event deleted"}
+
+
+def mark_payment_paid(
+    db: Session,
+    building_id: uuid.UUID,
+    payment_id: str,
+    notes: str | None = None,
+) -> dict:
+    from app.models.resident import Payment, PaymentStatus
+    from app.schemas.resident import PaymentResponse
+    from datetime import date
+
+    try:
+        parsed_payment_id = uuid.UUID(payment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment id") from exc
+
+    payment = (
+        db.query(Payment)
+        .join(ResidentProfile, ResidentProfile.user_id == Payment.resident_id)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .filter(Payment.id == parsed_payment_id, Unit.building_id == building_id)
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+
+    if payment.status == PaymentStatus.PAID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This payment is already marked as paid",
+        )
+
+    if payment.status == PaymentStatus.WAIVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This payment has been waived and cannot be marked as paid",
+        )
+
+    payment.status = PaymentStatus.PAID
+    payment.paid_date = date.today()
+    if notes:
+        payment.transaction_ref = notes
+
+    db.commit()
+    db.refresh(payment)
+    return PaymentResponse.model_validate(payment)
+
+
+def get_payments(db: Session, building_id: uuid.UUID) -> list:
+    """Get all payments for a building."""
+    from app.models.resident import Payment
+    from app.schemas.resident import PaymentResponse
+    
+    payments = (
+        db.query(Payment)
+        .join(ResidentProfile, ResidentProfile.user_id == Payment.resident_id)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .filter(Unit.building_id == building_id)
+        .all()
+    )
+    return [PaymentResponse.model_validate(p) for p in payments]
+
+
+def get_residents(db: Session, building_id: uuid.UUID) -> list:
+    """Get all residents for a building."""
+    residents = (
+        db.query(ResidentProfile, Unit)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .join(User, User.id == ResidentProfile.user_id)
+        .filter(Unit.building_id == building_id)
+        .all()
+    )
+    
+    result = []
+    for resident_profile, unit in residents:
+        result.append({
+            "id": str(resident_profile.user_id),
+            "full_name": resident_profile.full_name or "",
+            "unit_number": unit.unit_number or None,
+        })
+    return result
+
+
+def raise_bulk_due(
+    db: Session,
+    building_id: uuid.UUID,
+    admin_user_id: uuid.UUID,
+    payment_type: str,
+    amount: float,
+    due_date: str,
+    description: str | None = None,
+) -> dict:
+    """Raise a due for all residents in the building."""
+    from app.models.resident import Payment, PaymentStatus, PaymentType
+    from datetime import date
+    
+    # Validate payment type
+    try:
+        payment_type_enum = PaymentType(payment_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment type") from exc
+    
+    # Parse due date
+    try:
+        due_date_obj = datetime.strptime(due_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format. Use YYYY-MM-DD") from exc
+    
+    # Get all residents in the building
+    residents = (
+        db.query(ResidentProfile, Unit)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .filter(Unit.building_id == building_id)
+        .all()
+    )
+    
+    if not residents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No residents found in this building")
+    
+    created_count = 0
+    for resident_profile, _ in residents:
+        payment = Payment(
+            id=uuid.uuid4(),
+            resident_id=resident_profile.user_id,
+            amount=amount,
+            type=payment_type_enum,
+            status=PaymentStatus.PENDING,
+            due_date=due_date_obj,
+            description=description,
+            created_by=admin_user_id,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(payment)
+        created_count += 1
+    
+    db.commit()
+    return {"message": f"Due raised for {created_count} residents"}
+
+
+def raise_individual_due(
+    db: Session,
+    building_id: uuid.UUID,
+    admin_user_id: uuid.UUID,
+    resident_id: str,
+    payment_type: str,
+    amount: float,
+    due_date: str,
+    description: str | None = None,
+) -> dict:
+    """Raise a due for a specific resident."""
+    from app.models.resident import Payment, PaymentStatus, PaymentType
+    from datetime import date
+    
+    # Validate payment type
+    try:
+        payment_type_enum = PaymentType(payment_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment type") from exc
+    
+    # Parse due date
+    try:
+        due_date_obj = datetime.strptime(due_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format. Use YYYY-MM-DD") from exc
+    
+    # Verify resident exists in this building
+    try:
+        resident_uuid = uuid.UUID(resident_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid resident id") from exc
+    
+    resident = (
+        db.query(ResidentProfile)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .filter(ResidentProfile.user_id == resident_uuid, Unit.building_id == building_id)
+        .first()
+    )
+    
+    if not resident:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resident not found in this building")
+    
+    # Create payment
+    payment = Payment(
+        id=uuid.uuid4(),
+        resident_id=resident_uuid,
+        amount=amount,
+        type=payment_type_enum,
+        status=PaymentStatus.PENDING,
+        due_date=due_date_obj,
+        description=description,
+        created_by=admin_user_id,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    
+    from app.schemas.resident import PaymentResponse
+    return PaymentResponse.model_validate(payment)
+
+
+def waive_payment(
+    db: Session,
+    building_id: uuid.UUID,
+    payment_id: str,
+) -> dict:
+    """Waive a payment."""
+    from app.models.resident import Payment, PaymentStatus
+    from app.schemas.resident import PaymentResponse
+    
+    try:
+        parsed_payment_id = uuid.UUID(payment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment id") from exc
+    
+    payment = (
+        db.query(Payment)
+        .join(ResidentProfile, ResidentProfile.user_id == Payment.resident_id)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .filter(Payment.id == parsed_payment_id, Unit.building_id == building_id)
+        .first()
+    )
+    
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    
+    if payment.status == PaymentStatus.PAID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot waive a payment that is already paid",
+        )
+    
+    payment.status = PaymentStatus.WAIVED
+    db.commit()
+    db.refresh(payment)
+    return PaymentResponse.model_validate(payment)
