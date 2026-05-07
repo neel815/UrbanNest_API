@@ -651,10 +651,14 @@ def delete_user_by_role(user_id: str, role: UserRole, db: Session, building_id: 
 
     if role == UserRole.RESIDENT:
         resident_profile = db.query(ResidentProfile).filter(ResidentProfile.user_id == user.id).first()
-        if resident_profile and resident_profile.unit_id is not None:
-            unit = db.query(Unit).filter(Unit.id == resident_profile.unit_id).first()
-            if unit:
-                unit.status = UnitStatus.VACANT
+        if resident_profile:
+            # if resident has a unit, mark it vacant
+            if resident_profile.unit_id is not None:
+                unit = db.query(Unit).filter(Unit.id == resident_profile.unit_id).first()
+                if unit:
+                    unit.status = UnitStatus.VACANT
+            # delete the resident profile prior to deleting the user to avoid FK null updates
+            db.delete(resident_profile)
 
     db.delete(user)
     db.commit()
