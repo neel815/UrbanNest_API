@@ -299,6 +299,21 @@ def update_visitor_status(db: Session, user_id: UUID | str, visitor_id: UUID | s
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visitor not found")
 
     if data.status is not None:
+        if data.status == VisitorStatus.CHECKED_IN and record.status != VisitorStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Visitor must be approved before check-in",
+            )
+        if data.status == VisitorStatus.CHECKED_OUT and record.status != VisitorStatus.CHECKED_IN:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Visitor must be checked in before check-out",
+            )
+        if data.status in (VisitorStatus.APPROVED, VisitorStatus.DENIED) and record.status == VisitorStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only security can approve or deny visitor status",
+            )
         record.status = data.status
     if data.check_in_time is not None:
         record.check_in_time = data.check_in_time
