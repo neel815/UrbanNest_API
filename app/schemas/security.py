@@ -53,11 +53,9 @@ class Visitor(BaseModel):
     timeOut: str | None
     status: str
     contactNumber: str
-    vehicleNumber: str | None
     hostName: str
     hostUnit: str
     approvedBy: str | None
-    notes: str | None
 
 
 VisitorActionResponse = VisitorResponse

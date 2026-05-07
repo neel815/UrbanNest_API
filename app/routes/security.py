@@ -185,7 +185,7 @@ async def toggle_access_point(
 ):
     _require_security(current_user)
     try:
-        return security_service.toggle_access_point(db, point_id)
+        return security_service.toggle_access_point(db, point_id, current_user.id)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
@@ -229,7 +229,7 @@ async def complete_patrol_round(
 ):
     _require_security(current_user)
     try:
-        return security_service.complete_patrol_round(db, round_id)
+        return security_service.complete_patrol_round(db, round_id, current_user.id)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
@@ -244,7 +244,7 @@ async def check_checkpoint(
 ):
     _require_security(current_user)
     try:
-        return security_service.check_checkpoint(db, round_id, checkpoint_id, data)
+        return security_service.check_checkpoint(db, round_id, checkpoint_id, data, current_user.id)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
@@ -280,7 +280,7 @@ async def update_incident_status(
 ):
     _require_security(current_user)
     try:
-        return security_service.update_incident_status(db, current_user, incident_id, update_data)
+        return security_service.update_incident_status(db, current_user.id, incident_id, update_data)
     except ValueError as exc:
         raise _service_error(exc) from exc
 

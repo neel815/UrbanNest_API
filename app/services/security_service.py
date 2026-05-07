@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime, time, timezone
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
@@ -129,11 +130,9 @@ def _serialize_visitor(visitor: Visitor) -> dict:
         "timeOut": visitor.check_out_time.strftime("%I:%M %p") if visitor.check_out_time else None,
         "status": _visitor_status_label(visitor.status),
         "contactNumber": visitor.visitor_phone or "",
-        "vehicleNumber": None,
         "hostName": resident.full_name if resident else "",
         "hostUnit": unit_number,
         "approvedBy": visitor.approved_by_user.full_name if visitor.approved_by_user else None,
-        "notes": None,
     }
 
 
@@ -370,9 +369,10 @@ def create_visitor(db: Session, current_user: User, payload: dict) -> dict:
         purpose=payload.get("purpose"),
         resident_id=resident.id,
         expected_date=date.fromisoformat(payload.get("date") or datetime.now(timezone.utc).date().isoformat()),
-        check_in_time=datetime.now(timezone.utc),
+        check_in_time=None,
+        check_out_time=None,
         status=status,
-        approved_by=current_user.id,
+        approved_by=None,
     )
     db.add(visitor)
     db.commit()
@@ -389,6 +389,15 @@ def update_visitor_status(db: Session, current_user: User, visitor_id: str | UUI
     )
     if not visitor:
         raise ValueError("Visitor not found")
+
+    guard_building_id = _get_security_building_id(db, current_user.id)
+    resident = visitor.resident
+    resident_profile = resident.resident_profile if resident else None
+    unit = resident_profile.unit if resident_profile else None
+    visitor_building_id = unit.building_id if unit else None
+
+    if visitor_building_id != guard_building_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This visitor does not belong to your building")
 
     visitor.status = _visitor_status_db(status)
     visitor.approved_by = current_user.id
@@ -491,10 +500,13 @@ def get_access_logs(db: Session, user_id: str | UUID) -> list[dict]:
     return [_serialize_access_log(log) for log in logs]
 
 
-def toggle_access_point(db: Session, point_id: str | UUID) -> dict:
+def toggle_access_point(db: Session, point_id: str | UUID, user_id: str | UUID) -> dict:
+    guard_building_id = _get_security_building_id(db, _uuid(user_id))
     point = db.query(AccessPoint).filter(AccessPoint.id == _uuid(point_id)).first()
     if not point:
         raise ValueError("Access point not found")
+    if point.building_id != guard_building_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This access point does not belong to your building")
 
     point.is_active = not point.is_active
     db.commit()
@@ -544,10 +556,12 @@ def start_patrol_round(db: Session, current_user: User, patrol_data: dict) -> di
     return _serialize_patrol_round(patrol_round)
 
 
-def complete_patrol_round(db: Session, round_id: str | UUID) -> dict:
+def complete_patrol_round(db: Session, round_id: str | UUID, user_id: str | UUID) -> dict:
     patrol_round = db.query(PatrolRound).filter(PatrolRound.id == _uuid(round_id)).first()
     if not patrol_round:
         raise ValueError("Patrol round not found")
+    if patrol_round.guard_id != _uuid(user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only complete your own patrol rounds")
 
     patrol_round.completed_at = datetime.now(timezone.utc)
     patrol_round.status = PatrolStatus.COMPLETED
@@ -556,10 +570,12 @@ def complete_patrol_round(db: Session, round_id: str | UUID) -> dict:
     return _serialize_patrol_round(patrol_round)
 
 
-def check_checkpoint(db: Session, round_id: str | UUID, checkpoint_id: int, data: dict) -> dict:
+def check_checkpoint(db: Session, round_id: str | UUID, checkpoint_id: int, data: dict, user_id: str | UUID) -> dict:
     patrol_round = db.query(PatrolRound).filter(PatrolRound.id == _uuid(round_id)).first()
     if not patrol_round:
         raise ValueError("Patrol round not found")
+    if patrol_round.guard_id != _uuid(user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only update your own patrol checkpoints")
 
     round_payload = _serialize_patrol_round(patrol_round)
     for checkpoint in round_payload["checkpoints"]:
@@ -568,7 +584,7 @@ def check_checkpoint(db: Session, round_id: str | UUID, checkpoint_id: int, data
             checkpoint["status"] = "checked"
             checkpoint["notes"] = data.get("notes")
             break
-    return {"id": round_payload["id"], "checkpoints": round_payload["checkpoints"]}
+    return round_payload
 
 
 def get_incidents(db: Session, user_id: str | UUID) -> list[dict]:
@@ -601,17 +617,27 @@ def create_incident(db: Session, current_user: User, payload: dict) -> dict:
     return _serialize_incident(incident)
 
 
-def update_incident_status(db: Session, current_user: User, incident_id: str | UUID, payload: dict) -> dict:
+def update_incident_status(db: Session, user_id: str | UUID, incident_id: str | UUID, payload: dict) -> dict:
+    guard_building_id = _get_security_building_id(db, _uuid(user_id))
     incident = db.query(Incident).filter(Incident.id == _uuid(incident_id)).first()
     if not incident:
         raise ValueError("Incident not found")
+
+    if incident.reported_by is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot update this incident")
+
+    if getattr(incident, "building_id", None) is not None:
+        if incident.building_id != guard_building_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot update this incident")
+    elif incident.reported_by != _uuid(user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot update this incident")
 
     incident.status = SecurityIncidentStatus(payload.get("status", incident.status.value))
     db.commit()
     db.refresh(incident)
     db.refresh(incident, attribute_names=["reporter"])
     serialized = _serialize_incident(incident)
-    serialized["assignedTo"] = current_user.full_name
+    serialized["assignedTo"] = incident.reporter.full_name if incident.reporter else None
     if incident.status in {SecurityIncidentStatus.RESOLVED, SecurityIncidentStatus.CLOSED}:
         serialized["resolvedAt"] = datetime.now(timezone.utc).isoformat()
     serialized["resolution"] = payload.get("resolution")

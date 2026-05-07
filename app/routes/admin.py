@@ -422,16 +422,6 @@ def trigger_overdue_check(
     return {"message": "Overdue check completed"}
 
 
-@router.get("/residents")
-def list_residents(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    require_admin(current_user)
-    building_id = get_admin_building_id(db, current_user.id)
-    return get_residents(db, building_id)
-
-
 @router.post("/payments/bulk", status_code=status.HTTP_201_CREATED)
 def raise_bulk_payment(
     payload: RaiseBulkDueRequest,
