@@ -38,6 +38,8 @@ class InviteManagedUserRequest(BaseModel):
     phone_number: str | None = Field(default=None, max_length=30)
     profile_image: str | None = None
     unit_id: str | None = None
+    move_in_date: date | None = None
+    lease_end_date: date | None = None
 
 
 class InviteManagedUserResponse(BaseModel):
@@ -64,6 +66,8 @@ class CreateManagedUserRequest(BaseModel):
     password: str = Field(min_length=8)
     profile_image: str | None = None
     unit_id: str | None = None
+    move_in_date: date | None = None
+    lease_end_date: date | None = None
 
 
 class UpdateManagedUserRequest(BaseModel):

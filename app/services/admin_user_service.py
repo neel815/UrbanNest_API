@@ -459,7 +459,13 @@ def create_user_by_role(
         if unit.status != UnitStatus.VACANT:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit is not vacant")
 
-        db.add(ResidentProfile(user_id=user.id, unit_id=unit.id))
+        resident_profile = ResidentProfile(
+            user_id=user.id,
+            unit_id=unit.id,
+            move_in_date=datetime.combine(payload.move_in_date, datetime.min.time(), tzinfo=timezone.utc) if payload.move_in_date else None,
+            lease_end_date=datetime.combine(payload.lease_end_date, datetime.min.time(), tzinfo=timezone.utc) if payload.lease_end_date else None,
+        )
+        db.add(resident_profile)
         unit.status = UnitStatus.OCCUPIED
     elif role == UserRole.SECURITY:
         db.add(SecurityProfile(user_id=user.id, assigned_building_id=building_id))
@@ -513,7 +519,13 @@ def invite_user_by_role(
         if unit.status != UnitStatus.VACANT:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unit is not vacant")
 
-        db.add(ResidentProfile(user_id=user.id, unit_id=unit.id))
+        resident_profile = ResidentProfile(
+            user_id=user.id,
+            unit_id=unit.id,
+            move_in_date=datetime.combine(payload.move_in_date, datetime.min.time(), tzinfo=timezone.utc) if payload.move_in_date else None,
+            lease_end_date=datetime.combine(payload.lease_end_date, datetime.min.time(), tzinfo=timezone.utc) if payload.lease_end_date else None,
+        )
+        db.add(resident_profile)
         unit.status = UnitStatus.OCCUPIED
     elif role == UserRole.SECURITY:
         db.add(SecurityProfile(user_id=user.id, assigned_building_id=building_id))

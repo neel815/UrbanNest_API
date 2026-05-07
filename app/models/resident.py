@@ -84,6 +84,7 @@ class ResidentProfile(Base):
     )
     move_in_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     move_out_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     emergency_contact_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     emergency_contact_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
