@@ -51,8 +51,8 @@ def register(
 
 
 @router.get("/auth/me", response_model=MeResponse)
-def me(current_user: User = Depends(get_current_user)) -> MeResponse:
-    return build_me_response(current_user)
+def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeResponse:
+    return build_me_response(current_user, db)
 
 
 @router.put("/auth/me/profile", response_model=MeResponse)

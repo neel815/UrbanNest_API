@@ -28,6 +28,9 @@ class MeResponse(BaseModel):
     email: EmailStr
     role: UserRole
     profile_image: str | None = None
+    shift: str | None = None
+    assigned_building_name: str | None = None
+    badge_number: str | None = None
 
 
 class UpdateProfileRequest(BaseModel):

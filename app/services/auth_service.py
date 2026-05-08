@@ -5,10 +5,11 @@ import logging
 
 from fastapi import Depends, Header, HTTPException, status
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.database import get_db
+from app.models.security import SecurityProfile
 from app.models.resident import ResidentProfile
 from app.models.user import User, UserRole
 from app.schemas.auth import (
@@ -217,13 +218,24 @@ def register_user(
     )
 
 
-def build_me_response(current_user: User) -> MeResponse:
+def build_me_response(current_user: User, db: Session) -> MeResponse:
+    security_profile = None
+    if current_user.role == UserRole.SECURITY:
+        security_profile = (
+            db.query(SecurityProfile)
+            .options(joinedload(SecurityProfile.assigned_building))
+            .filter(SecurityProfile.user_id == current_user.id)
+            .first()
+        )
     return MeResponse(
         user_id=str(current_user.id),
         full_name=current_user.full_name,
         email=current_user.email,
         role=current_user.role,
         profile_image=current_user.profile_image,
+        shift=security_profile.shift.value if security_profile and security_profile.shift else None,
+        assigned_building_name=security_profile.assigned_building.name if security_profile and security_profile.assigned_building else None,
+        badge_number=security_profile.badge_number if security_profile else None,
     )
 
 
@@ -236,4 +248,4 @@ def update_current_user_profile(
     current_user.profile_image = payload.profile_image
     db.commit()
     db.refresh(current_user)
-    return build_me_response(current_user)
+    return build_me_response(current_user, db)
