@@ -671,6 +671,12 @@ def delete_user_by_role(user_id: str, role: UserRole, db: Session, building_id: 
                     unit.status = UnitStatus.VACANT
             # delete the resident profile prior to deleting the user to avoid FK null updates
             db.delete(resident_profile)
+    
+    if role == UserRole.SECURITY:
+        security_profile = db.query(SecurityProfile).filter(SecurityProfile.user_id == user.id).first()
+        if security_profile:
+            # delete the security profile prior to deleting the user to avoid FK null updates
+            db.delete(security_profile)
 
     db.delete(user)
     db.commit()
