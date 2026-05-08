@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.admin import Announcement, Building, BuildingType, Unit, UnitStatus
 from app.models.resident import Event, MaintenanceRequest, MaintenanceStatus, Payment, PaymentStatus, ResidentProfile, Visitor
-from app.models.security import SecurityProfile
+from app.models.security import SecurityProfile, SecurityShift
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
 from app.schemas.admin import (
@@ -138,6 +138,29 @@ def _serialize_user(user: User) -> ManagedUserResponse:
         created_at=user.created_at.isoformat(),
         must_reset_password=user.must_reset_password,
         is_active=None,
+        shift=None,
+        assigned_building_id=None,
+        assigned_building_name=None,
+        badge_number=None,
+    )
+
+
+def _serialize_security_user(profile: SecurityProfile) -> ManagedUserResponse:
+    user = profile.user
+    return ManagedUserResponse(
+        id=str(user.id),
+        full_name=user.full_name,
+        email=user.email,
+        phone_number=user.phone_number,
+        role=user.role.value,
+        profile_image=user.profile_image,
+        created_at=user.created_at.isoformat(),
+        must_reset_password=user.must_reset_password,
+        is_active=profile.is_active,
+        shift=profile.shift.value if profile.shift else None,
+        assigned_building_id=str(profile.assigned_building_id) if profile.assigned_building_id else None,
+        assigned_building_name=profile.assigned_building.name if profile.assigned_building else None,
+        badge_number=profile.badge_number,
     )
 
 
@@ -289,27 +312,15 @@ def list_users_by_role(role: UserRole, db: Session, building_id: uuid.UUID | Non
         return [_serialize_user(profile.user) for profile in profiles]
 
     if role == UserRole.SECURITY:
-        query = db.query(SecurityProfile).join(User, User.id == SecurityProfile.user_id)
+        query = (
+            db.query(SecurityProfile)
+            .join(User, User.id == SecurityProfile.user_id)
+            .options(joinedload(SecurityProfile.user), joinedload(SecurityProfile.assigned_building))
+        )
         if building_id is not None:
             query = query.filter(SecurityProfile.assigned_building_id == building_id)
         profiles = query.order_by(User.created_at.desc()).all()
-        # Include is_active from the security profile so frontend can render pending/active status
-        result: list[ManagedUserResponse] = []
-        for profile in profiles:
-            user_model = profile.user
-            serialized = ManagedUserResponse(
-                id=str(user_model.id),
-                full_name=user_model.full_name,
-                email=user_model.email,
-                phone_number=user_model.phone_number,
-                role=user_model.role.value,
-                profile_image=user_model.profile_image,
-                created_at=user_model.created_at.isoformat(),
-                must_reset_password=user_model.must_reset_password,
-                is_active=profile.is_active,
-            )
-            result.append(serialized)
-        return result
+        return [_serialize_security_user(profile) for profile in profiles]
 
     users = db.query(User).filter(User.role == role).order_by(User.created_at.desc()).all()
     return [_serialize_user(user) for user in users]
@@ -468,10 +479,27 @@ def create_user_by_role(
         db.add(resident_profile)
         unit.status = UnitStatus.OCCUPIED
     elif role == UserRole.SECURITY:
-        db.add(SecurityProfile(user_id=user.id, assigned_building_id=building_id))
+        db.add(
+            SecurityProfile(
+                user_id=user.id,
+                assigned_building_id=building_id,
+                shift=payload.shift or SecurityShift.ROTATING,
+            )
+        )
 
     db.commit()
     db.refresh(user)
+
+    if role == UserRole.SECURITY:
+        security_profile = (
+            db.query(SecurityProfile)
+            .options(joinedload(SecurityProfile.user), joinedload(SecurityProfile.assigned_building))
+            .filter(SecurityProfile.user_id == user.id)
+            .first()
+        )
+        if security_profile:
+            return _serialize_security_user(security_profile)
+
     return _serialize_user(user)
 
 
@@ -528,7 +556,13 @@ def invite_user_by_role(
         db.add(resident_profile)
         unit.status = UnitStatus.OCCUPIED
     elif role == UserRole.SECURITY:
-        db.add(SecurityProfile(user_id=user.id, assigned_building_id=building_id))
+        db.add(
+            SecurityProfile(
+                user_id=user.id,
+                assigned_building_id=building_id,
+                shift=payload.shift or SecurityShift.ROTATING,
+            )
+        )
 
     db.commit()
 
@@ -626,8 +660,24 @@ def update_user_by_role(
     if payload.password:
         user.hashed_password = hash_password(payload.password)
 
+    if role == UserRole.SECURITY and payload.shift is not None:
+        security_profile = db.query(SecurityProfile).filter(SecurityProfile.user_id == user.id).first()
+        if security_profile:
+            security_profile.shift = payload.shift
+
     db.commit()
     db.refresh(user)
+
+    if role == UserRole.SECURITY:
+        security_profile = (
+            db.query(SecurityProfile)
+            .options(joinedload(SecurityProfile.user), joinedload(SecurityProfile.assigned_building))
+            .filter(SecurityProfile.user_id == user.id)
+            .first()
+        )
+        if security_profile:
+            return _serialize_security_user(security_profile)
+
     return _serialize_user(user)
 
 

@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.admin import AnnouncementPriority, BuildingType, UnitStatus
+from app.models.security import SecurityShift
 from app.models.resident import ForumPostCategory, MaintenanceStatus
 from app.schemas.resident import MaintenanceRequestResponse
 
@@ -37,6 +38,7 @@ class InviteManagedUserRequest(BaseModel):
     email: EmailStr
     phone_number: str | None = Field(default=None, max_length=30)
     profile_image: str | None = None
+    shift: SecurityShift | None = None
     unit_id: str | None = None
     move_in_date: date | None = None
     lease_end_date: date | None = None
@@ -57,6 +59,10 @@ class ManagedUserResponse(BaseModel):
     created_at: str
     must_reset_password: bool | None = None
     is_active: bool | None = None
+    shift: str | None = None
+    assigned_building_id: str | None = None
+    assigned_building_name: str | None = None
+    badge_number: str | None = None
 
 
 class CreateManagedUserRequest(BaseModel):
@@ -65,6 +71,7 @@ class CreateManagedUserRequest(BaseModel):
     phone_number: str | None = Field(default=None, max_length=30)
     password: str = Field(min_length=8)
     profile_image: str | None = None
+    shift: SecurityShift | None = None
     unit_id: str | None = None
     move_in_date: date | None = None
     lease_end_date: date | None = None
@@ -76,6 +83,7 @@ class UpdateManagedUserRequest(BaseModel):
     phone_number: str | None = Field(default=None, max_length=30)
     profile_image: str | None = None
     password: str | None = Field(default=None, min_length=8)
+    shift: SecurityShift | None = None
 
 
 class UnitResponse(BaseModel):
