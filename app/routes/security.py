@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
 from app.schemas.resident import AnnouncementResponse, VisitorResponse
+from app.schemas.admin import ResidentListResponse
 from app.schemas.security import (
     DashboardStats,
     Visitor,
@@ -67,6 +68,15 @@ async def get_visitors(
 ):
     _require_security(current_user)
     return security_service.get_visitors(db, current_user.id)
+
+
+@router.get("/hosts", response_model=list[ResidentListResponse])
+async def get_hosts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_security(current_user)
+    return security_service.get_host_residents(db, current_user.id)
 
 
 @router.post("/visitors", response_model=Visitor)

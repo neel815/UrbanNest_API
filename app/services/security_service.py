@@ -21,6 +21,7 @@ from app.models import (
     SecurityIncidentSeverity,
     SecurityIncidentStatus,
     SecurityReport,
+    Unit,
     Visitor,
     VisitorStatus,
 )
@@ -393,13 +394,48 @@ def get_visitors(db: Session, user_id: str | UUID) -> list[dict]:
     return [_serialize_visitor(visitor) for visitor in visitors]
 
 
+def get_host_residents(db: Session, user_id: str | UUID) -> list[dict]:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+
+    residents = (
+        db.query(ResidentProfile, Unit, User)
+        .join(Unit, Unit.id == ResidentProfile.unit_id)
+        .join(User, User.id == ResidentProfile.user_id)
+        .filter(Unit.building_id == building_id)
+        .all()
+    )
+
+    return [
+        {
+            "id": str(resident_profile.user_id),
+            "full_name": user.full_name or "",
+            "unit_number": unit.unit_number or None,
+        }
+        for resident_profile, unit, user in residents
+    ]
+
+
 def create_visitor(db: Session, current_user: User, payload: dict) -> dict:
     host_name = payload.get("hostName", "").strip()
     host_unit = payload.get("hostUnit", "").strip()
-    resident_query = db.query(User).filter(User.role == UserRole.RESIDENT, User.full_name == host_name)
-    resident = resident_query.options(joinedload(User.resident_profile).joinedload("unit")).first()
+    building_id = _get_security_building_id(db, current_user.id)
+    resident_query = (
+        db.query(User)
+        .join(User.resident_profile)
+        .join(ResidentProfile.unit)
+        .filter(
+            User.role == UserRole.RESIDENT,
+            User.full_name == host_name,
+            Unit.building_id == building_id,
+        )
+    )
+    if host_unit:
+        resident_query = resident_query.filter(Unit.unit_number == host_unit)
+
+    resident = resident_query.options(joinedload(User.resident_profile).joinedload(ResidentProfile.unit)).first()
     if not resident:
-        raise ValueError("Host resident not found")
+        raise ValueError("Host resident not found in your building")
     if host_unit:
         resident_unit = resident.resident_profile.unit.unit_number if resident.resident_profile and resident.resident_profile.unit else None
         if resident_unit and resident_unit != host_unit:
