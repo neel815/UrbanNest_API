@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime, time, timezone
+import uuid
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -12,6 +13,7 @@ from app.models import (
     Announcement,
     Incident,
     PatrolStatus,
+    PatrolRoundCheckpoint,
     PatrolRound,
     PatrolRoute,
     ResidentProfile,
@@ -25,6 +27,15 @@ from app.models import (
 from app.models.user import User, UserRole
 from app.models.security import SecurityProfile
 from app.schemas.resident import AnnouncementResponse
+from app.schemas.security import (
+    CheckpointVisitRequest,
+    EntryLogResponse,
+    PatrolRouteCheckpointResponse,
+    PatrolRouteResponse,
+    PatrolRoundCheckpointResponse,
+    PatrolRoundResponse,
+    StartPatrolRoundRequest,
+)
 
 
 def _uuid(value: str | UUID | None) -> UUID | None:
@@ -163,52 +174,84 @@ def _serialize_access_log(log: AccessLog) -> dict:
     }
 
 
-def _serialize_patrol_route(route: PatrolRoute) -> dict:
-    checkpoints = route.checkpoints if isinstance(route.checkpoints, list) else []
-    checkpoint_names = []
-    for checkpoint in checkpoints:
+def _checkpoint_uuid(route_id: UUID, order_index: int, name: str) -> UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"urban-nest:patrol-route:{route_id}:{order_index}:{name}")
+
+
+def _normalize_route_checkpoints(route: PatrolRoute) -> list[PatrolRouteCheckpointResponse]:
+    checkpoint_rows = route.checkpoints if isinstance(route.checkpoints, list) else []
+    checkpoints: list[PatrolRouteCheckpointResponse] = []
+    # Build a list of (order_index, name) then sort deterministically
+    annotated: list[tuple[int, str]] = []
+    for idx, checkpoint in enumerate(checkpoint_rows, start=1):
         if isinstance(checkpoint, dict):
-            checkpoint_names.append(str(checkpoint.get("name", "Checkpoint")))
+            order_index = int(checkpoint.get("order_index", idx))
+            checkpoint_name = str(checkpoint.get("name", f"Checkpoint {idx}"))
         else:
-            checkpoint_names.append(str(checkpoint))
-    return {
-        "id": str(route.id),
-        "name": route.name,
-        "description": f"Patrol route for {route.name}",
-        "estimatedDuration": max(len(checkpoint_names), 1) * 15,
-        "checkpoints": checkpoint_names,
-        "priority": "medium",
-        "isActive": True,
-    }
+            order_index = idx
+            checkpoint_name = str(checkpoint)
+        annotated.append((order_index, checkpoint_name))
 
-
-def _serialize_patrol_round(round_: PatrolRound) -> dict:
-    route = round_.route
-    route_checkpoints = route.checkpoints if route and isinstance(route.checkpoints, list) else []
-    checkpoints = []
-    for index, checkpoint in enumerate(route_checkpoints):
-        checkpoint_name = checkpoint.get("name") if isinstance(checkpoint, dict) else str(checkpoint)
+    annotated.sort(key=lambda t: t[0])
+    for order_index, checkpoint_name in annotated:
         checkpoints.append(
-            {
-                "id": index + 1,
-                "name": checkpoint_name,
-                "location": checkpoint.get("location", f"Location for {checkpoint_name}") if isinstance(checkpoint, dict) else f"Location for {checkpoint_name}",
-                "checkedAt": checkpoint.get("checkedAt") if isinstance(checkpoint, dict) else None,
-                "status": checkpoint.get("status", "pending") if isinstance(checkpoint, dict) else "pending",
-                "notes": checkpoint.get("notes") if isinstance(checkpoint, dict) else None,
-            }
+            PatrolRouteCheckpointResponse(
+                id=_checkpoint_uuid(route.id, order_index, checkpoint_name),
+                name=checkpoint_name,
+                order_index=order_index,
+            )
         )
-    return {
-        "id": str(round_.id),
-        "guardName": round_.guard.full_name if round_.guard else "",
-        "startTime": _serialize_timestamp(round_.started_at) or "",
-        "endTime": _serialize_timestamp(round_.completed_at),
-        "status": round_.status.value,
-        "route": route.name if route else "",
-        "checkpoints": checkpoints,
-        "incidents": 0,
-        "notes": None,
-    }
+    checkpoints.sort(key=lambda checkpoint: checkpoint.order_index)
+    return checkpoints
+
+
+def _serialize_patrol_route(route: PatrolRoute) -> PatrolRouteResponse:
+    return PatrolRouteResponse(
+        id=route.id,
+        name=route.name,
+        description=route.description,
+        building_id=route.building_id,
+        is_active=route.is_active,
+        checkpoints=_normalize_route_checkpoints(route),
+        created_at=route.created_at,
+        updated_at=route.updated_at,
+    )
+
+
+def _serialize_patrol_round_checkpoint(checkpoint: PatrolRoundCheckpoint) -> PatrolRoundCheckpointResponse:
+    return PatrolRoundCheckpointResponse(
+        id=checkpoint.id,
+        checkpoint_id=checkpoint.checkpoint_id,
+        checkpoint_name=checkpoint.checkpoint_name,
+        order_index=checkpoint.order_index,
+        is_visited=checkpoint.is_visited,
+        visited_at=checkpoint.visited_at,
+        notes=checkpoint.notes,
+    )
+
+
+def _serialize_patrol_round(round_: PatrolRound) -> PatrolRoundResponse:
+    route = round_.route
+    checkpoints = list(round_.checkpoints or [])
+    visited_checkpoints = sum(1 for checkpoint in checkpoints if checkpoint.is_visited)
+    status = round_.status.value
+    if status == PatrolStatus.CANCELLED.value:
+        status = "abandoned"
+    return PatrolRoundResponse(
+        id=round_.id,
+        guard_id=round_.guard_id,
+        route_id=round_.route_id,
+        route_name=route.name if route else "",
+        status=status,
+        started_at=round_.started_at,
+        completed_at=round_.completed_at,
+        notes=round_.notes,
+        checkpoints=[_serialize_patrol_round_checkpoint(checkpoint) for checkpoint in checkpoints],
+        total_checkpoints=len(checkpoints),
+        visited_checkpoints=visited_checkpoints,
+        created_at=round_.created_at,
+        updated_at=round_.updated_at,
+    )
 
 
 def _serialize_incident(incident: Incident) -> dict:
@@ -500,6 +543,51 @@ def get_access_logs(db: Session, user_id: str | UUID) -> list[dict]:
     return [_serialize_access_log(log) for log in logs]
 
 
+def _serialize_entry_log(visitor: Visitor) -> EntryLogResponse:
+    resident = visitor.resident
+    resident_profile = resident.resident_profile if resident else None
+    unit = resident_profile.unit if resident_profile else None
+    logged_at = visitor.check_in_time or visitor.check_out_time or visitor.created_at
+    return EntryLogResponse(
+        id=visitor.id,
+        visitor_name=visitor.visitor_name,
+        resident_name=resident.full_name if resident else "",
+        unit_number=unit.unit_number if unit else None,
+        status=visitor.status.value,
+        check_in_time=visitor.check_in_time,
+        check_out_time=visitor.check_out_time,
+        logged_at=logged_at,
+        approved_by_name=visitor.approved_by_user.full_name if visitor.approved_by_user else None,
+        purpose=visitor.purpose,
+    )
+
+
+def get_entry_logs(db: Session, user_id: str | UUID) -> list[EntryLogResponse]:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+
+    resident_ids_query = (
+        db.query(ResidentProfile.user_id)
+        .join(ResidentProfile.unit)
+        .filter(ResidentProfile.unit_id.isnot(None), ResidentProfile.unit.has(building_id=building_id))
+    )
+
+    logs = (
+        db.query(Visitor)
+        .options(
+            joinedload(Visitor.resident).joinedload(User.resident_profile).joinedload(ResidentProfile.unit),
+            joinedload(Visitor.approved_by_user),
+        )
+        .filter(
+            Visitor.resident_id.in_(resident_ids_query),
+            Visitor.status.in_([VisitorStatus.CHECKED_IN, VisitorStatus.CHECKED_OUT, VisitorStatus.DENIED]),
+        )
+        .order_by(func.coalesce(Visitor.check_in_time, Visitor.check_out_time, Visitor.created_at).desc())
+        .all()
+    )
+    return [_serialize_entry_log(log) for log in logs]
+
+
 def toggle_access_point(db: Session, point_id: str | UUID, user_id: str | UUID) -> dict:
     guard_building_id = _get_security_building_id(db, _uuid(user_id))
     point = db.query(AccessPoint).filter(AccessPoint.id == _uuid(point_id)).first()
@@ -516,12 +604,12 @@ def toggle_access_point(db: Session, point_id: str | UUID, user_id: str | UUID) 
     return _serialize_access_point(point, int(access_count), last_access)
 
 
-def get_patrol_rounds(db: Session, user_id: str | UUID) -> list[dict]:
+def get_patrol_rounds(db: Session, user_id: str | UUID) -> list[PatrolRoundResponse]:
     parsed_user_id = _uuid(user_id)
 
     rounds = (
         db.query(PatrolRound)
-        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route))
+        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route), joinedload(PatrolRound.checkpoints))
         .filter(PatrolRound.guard_id == parsed_user_id)
         .order_by(PatrolRound.started_at.desc())
         .all()
@@ -529,62 +617,154 @@ def get_patrol_rounds(db: Session, user_id: str | UUID) -> list[dict]:
     return [_serialize_patrol_round(round_) for round_ in rounds]
 
 
-def get_patrol_routes(db: Session, user_id: str | UUID) -> list[dict]:
+def get_patrol_routes(db: Session, user_id: str | UUID) -> list[PatrolRouteResponse]:
     parsed_user_id = _uuid(user_id)
     building_id = _get_security_building_id(db, parsed_user_id)
-    routes = db.query(PatrolRoute).filter(PatrolRoute.building_id == building_id).order_by(PatrolRoute.name.asc()).all()
+    routes = (
+        db.query(PatrolRoute)
+        .filter(PatrolRoute.building_id == building_id, PatrolRoute.is_active.is_(True))
+        .order_by(PatrolRoute.name.asc(), PatrolRoute.created_at.desc())
+        .all()
+    )
     return [_serialize_patrol_route(route) for route in routes]
 
 
-def start_patrol_round(db: Session, current_user: User, patrol_data: dict) -> dict:
-    building_id = _get_security_building_id(db, current_user.id)
-    route = db.query(PatrolRoute).filter(PatrolRoute.id == _uuid(patrol_data.get("routeId"))).first()
+def start_patrol_round(db: Session, user_id: str | UUID, data: StartPatrolRoundRequest) -> PatrolRoundResponse:
+    parsed_user_id = _uuid(user_id)
+    building_id = _get_security_building_id(db, parsed_user_id)
+    active_round = (
+        db.query(PatrolRound)
+        .filter(PatrolRound.guard_id == parsed_user_id, PatrolRound.status == PatrolStatus.IN_PROGRESS)
+        .first()
+    )
+    if active_round:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Complete your current round first")
+
+    route = db.query(PatrolRoute).filter(PatrolRoute.id == data.route_id).first()
     if not route:
         raise ValueError("Patrol route not found")
     if route.building_id != building_id:
         raise ValueError("Patrol route does not belong to your building")
+    if not route.is_active:
+        raise ValueError("Patrol route is inactive")
 
+    route_checkpoints = _normalize_route_checkpoints(route)
     patrol_round = PatrolRound(
-        guard_id=current_user.id,
+        guard_id=parsed_user_id,
         route_id=route.id,
         started_at=datetime.now(timezone.utc),
         status=PatrolStatus.IN_PROGRESS,
+        notes=data.notes,
     )
     db.add(patrol_round)
+    db.flush()
+
+    for checkpoint in route_checkpoints:
+        db.add(
+            PatrolRoundCheckpoint(
+                round_id=patrol_round.id,
+                checkpoint_id=checkpoint.id,
+                checkpoint_name=checkpoint.name,
+                order_index=checkpoint.order_index,
+                is_visited=False,
+            )
+        )
+
     db.commit()
-    db.refresh(patrol_round)
+    patrol_round = (
+        db.query(PatrolRound)
+        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route), joinedload(PatrolRound.checkpoints))
+        .filter(PatrolRound.id == patrol_round.id)
+        .first()
+    )
+    if patrol_round is None:
+        raise ValueError("Patrol round not found")
     return _serialize_patrol_round(patrol_round)
 
+def mark_checkpoint_visited(
+    db: Session,
+    user_id: str | UUID,
+    round_id: str | UUID,
+    checkpoint_id: str | UUID,
+    data: CheckpointVisitRequest,
+) -> PatrolRoundResponse:
+    parsed_user_id = _uuid(user_id)
+    patrol_round = (
+        db.query(PatrolRound)
+        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route), joinedload(PatrolRound.checkpoints))
+        .filter(PatrolRound.id == _uuid(round_id))
+        .first()
+    )
+    if not patrol_round:
+        raise ValueError("Patrol round not found")
+    if patrol_round.guard_id != parsed_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only complete your own patrol rounds")
+    if patrol_round.status != PatrolStatus.IN_PROGRESS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This round is no longer in progress")
 
-def complete_patrol_round(db: Session, round_id: str | UUID, user_id: str | UUID) -> dict:
-    patrol_round = db.query(PatrolRound).filter(PatrolRound.id == _uuid(round_id)).first()
+    parsed_checkpoint_id = _uuid(checkpoint_id)
+    checkpoint = (
+        db.query(PatrolRoundCheckpoint)
+        .filter(
+            PatrolRoundCheckpoint.round_id == patrol_round.id,
+            PatrolRoundCheckpoint.checkpoint_id == parsed_checkpoint_id,
+        )
+        .first()
+    )
+    if not checkpoint:
+        raise ValueError("Checkpoint not found")
+
+    checkpoint.is_visited = True
+    checkpoint.visited_at = datetime.now(timezone.utc)
+    if data.notes is not None:
+        checkpoint.notes = data.notes
+
+    db.commit()
+    refreshed_round = (
+        db.query(PatrolRound)
+        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route), joinedload(PatrolRound.checkpoints))
+        .filter(PatrolRound.id == patrol_round.id)
+        .first()
+    )
+    if refreshed_round is None:
+        raise ValueError("Patrol round not found")
+    return _serialize_patrol_round(refreshed_round)
+
+
+def complete_patrol_round(db: Session, round_id: str | UUID, user_id: str | UUID) -> PatrolRoundResponse:
+    patrol_round = (
+        db.query(PatrolRound)
+        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route), joinedload(PatrolRound.checkpoints))
+        .filter(PatrolRound.id == _uuid(round_id))
+        .first()
+    )
     if not patrol_round:
         raise ValueError("Patrol round not found")
     if patrol_round.guard_id != _uuid(user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only complete your own patrol rounds")
+    if patrol_round.status == PatrolStatus.COMPLETED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This round has already been completed")
+
+    incomplete_checkpoints = [checkpoint for checkpoint in patrol_round.checkpoints if not checkpoint.is_visited]
+    if incomplete_checkpoints:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Complete all checkpoints before finishing the round")
 
     patrol_round.completed_at = datetime.now(timezone.utc)
     patrol_round.status = PatrolStatus.COMPLETED
     db.commit()
-    db.refresh(patrol_round)
-    return _serialize_patrol_round(patrol_round)
+    refreshed_round = (
+        db.query(PatrolRound)
+        .options(joinedload(PatrolRound.guard), joinedload(PatrolRound.route), joinedload(PatrolRound.checkpoints))
+        .filter(PatrolRound.id == patrol_round.id)
+        .first()
+    )
+    if refreshed_round is None:
+        raise ValueError("Patrol round not found")
+    return _serialize_patrol_round(refreshed_round)
 
 
 def check_checkpoint(db: Session, round_id: str | UUID, checkpoint_id: int, data: dict, user_id: str | UUID) -> dict:
-    patrol_round = db.query(PatrolRound).filter(PatrolRound.id == _uuid(round_id)).first()
-    if not patrol_round:
-        raise ValueError("Patrol round not found")
-    if patrol_round.guard_id != _uuid(user_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only update your own patrol checkpoints")
-
-    round_payload = _serialize_patrol_round(patrol_round)
-    for checkpoint in round_payload["checkpoints"]:
-        if checkpoint["id"] == checkpoint_id:
-            checkpoint["checkedAt"] = datetime.now(timezone.utc).isoformat()
-            checkpoint["status"] = "checked"
-            checkpoint["notes"] = data.get("notes")
-            break
-    return round_payload
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Use the checkpoint visit endpoint")
 
 
 def get_incidents(db: Session, user_id: str | UUID) -> list[dict]:

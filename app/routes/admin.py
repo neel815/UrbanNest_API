@@ -10,6 +10,8 @@ from app.schemas.admin import (
     AnnouncementResponse,
     AdminBuildingInfoResponse,
     AdminDashboardStatsResponse,
+    PatrolRouteCreateRequest,
+    PatrolRouteResponse,
     EventCreateRequest,
     EventResponse,
     CreateManagedUserRequest,
@@ -59,6 +61,9 @@ from app.services.admin_user_service import (
     update_maintenance_status,
     update_user_by_role,
     update_unit_for_building,
+    create_patrol_route,
+    delete_patrol_route,
+    get_patrol_routes,
 )
 from app.services.scheduler_service import mark_overdue_payments
 from app.services.auth_service import get_current_user
@@ -191,6 +196,38 @@ def list_events(
     require_admin(current_user)
     building_id = get_admin_building_id(db, current_user.id)
     return get_events(db, building_id)
+
+
+@router.get("/patrol-routes", response_model=list[PatrolRouteResponse])
+def list_patrol_routes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[PatrolRouteResponse]:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return get_patrol_routes(db, building_id)
+
+
+@router.post("/patrol-routes", response_model=PatrolRouteResponse, status_code=status.HTTP_201_CREATED)
+def create_admin_patrol_route(
+    payload: PatrolRouteCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PatrolRouteResponse:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return create_patrol_route(db, building_id, payload)
+
+
+@router.delete("/patrol-routes/{route_id}")
+def remove_admin_patrol_route(
+    route_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    require_admin(current_user)
+    building_id = get_admin_building_id(db, current_user.id)
+    return delete_patrol_route(db, building_id, str(route_id))
 
 
 @router.post("/events", response_model=EventResponse, status_code=status.HTTP_201_CREATED)

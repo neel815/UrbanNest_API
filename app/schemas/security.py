@@ -11,6 +11,9 @@ class SecurityProfileCreateRequest(BaseModel):
     user_id: UUID
     badge_number: str | None = Field(default=None, max_length=64)
     shift: SecurityShift = SecurityShift.ROTATING
+    shift_start_time: str | None = Field(default=None, max_length=5)
+    shift_end_time: str | None = Field(default=None, max_length=5)
+    assigned_gate: str | None = Field(default=None, max_length=150)
     assigned_building_id: UUID | None = None
     is_active: bool = True
 
@@ -18,6 +21,9 @@ class SecurityProfileCreateRequest(BaseModel):
 class SecurityProfileUpdateRequest(BaseModel):
     badge_number: str | None = Field(default=None, max_length=64)
     shift: SecurityShift | None = None
+    shift_start_time: str | None = Field(default=None, max_length=5)
+    shift_end_time: str | None = Field(default=None, max_length=5)
+    assigned_gate: str | None = Field(default=None, max_length=150)
     assigned_building_id: UUID | None = None
     is_active: bool | None = None
 
@@ -29,6 +35,9 @@ class SecurityProfileResponse(BaseModel):
     user_id: UUID
     badge_number: str | None
     shift: SecurityShift
+    shift_start_time: str | None
+    shift_end_time: str | None
+    assigned_gate: str | None
     assigned_building_id: UUID | None
     is_active: bool
     created_at: datetime
@@ -114,6 +123,66 @@ class PatrolRoute(BaseModel):
     isActive: bool
 
 
+class PatrolRouteCheckpointResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    order_index: int
+
+
+class PatrolRouteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str | None
+    building_id: UUID
+    is_active: bool
+    checkpoints: list[PatrolRouteCheckpointResponse]
+    created_at: datetime
+    updated_at: datetime
+
+
+class PatrolRoundCheckpointResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    checkpoint_id: UUID
+    checkpoint_name: str
+    order_index: int
+    is_visited: bool
+    visited_at: datetime | None
+    notes: str | None
+
+
+class PatrolRoundResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    guard_id: UUID
+    route_id: UUID
+    route_name: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None
+    notes: str | None
+    checkpoints: list[PatrolRoundCheckpointResponse]
+    total_checkpoints: int
+    visited_checkpoints: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class StartPatrolRoundRequest(BaseModel):
+    route_id: UUID
+    notes: str | None = None
+
+
+class CheckpointVisitRequest(BaseModel):
+    notes: str | None = None
+
+
 class Incident(BaseModel):
     id: str
     title: str
@@ -152,3 +221,18 @@ class SecurityReport(BaseModel):
     period: dict
     summary: dict
     fileUrl: str | None
+
+
+class EntryLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    visitor_name: str
+    resident_name: str
+    unit_number: str | None
+    status: str
+    check_in_time: datetime | None
+    check_out_time: datetime | None
+    logged_at: datetime
+    approved_by_name: str | None
+    purpose: str | None

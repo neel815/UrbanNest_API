@@ -72,6 +72,9 @@ class SecurityProfile(Base):
         default=SecurityShift.ROTATING,
         server_default=SecurityShift.ROTATING.value,
     )
+    shift_start_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    shift_end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    assigned_gate: Mapped[str | None] = mapped_column(String(150), nullable=True)
     assigned_building_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("buildings.id", ondelete="SET NULL"),
@@ -157,16 +160,57 @@ class PatrolRoute(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     building_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("buildings.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     checkpoints: Mapped[list[dict] | dict] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     building = relationship("Building")
     rounds: Mapped[list["PatrolRound"]] = relationship(back_populates="route")
+
+
+class PatrolRoundCheckpoint(Base):
+    __tablename__ = "patrol_round_checkpoints"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    round_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("patrol_rounds.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    checkpoint_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    checkpoint_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    order_index: Mapped[int] = mapped_column(nullable=False)
+    visited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_visited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    round = relationship("PatrolRound", back_populates="checkpoints")
 
 
 class PatrolRound(Base):
@@ -185,6 +229,7 @@ class PatrolRound(Base):
         nullable=False,
         index=True,
     )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -192,6 +237,19 @@ class PatrolRound(Base):
         server_default=func.now(),
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
     status: Mapped[PatrolStatus] = mapped_column(
         Enum(
             PatrolStatus,
@@ -206,6 +264,11 @@ class PatrolRound(Base):
 
     guard = relationship("User")
     route = relationship("PatrolRoute", back_populates="rounds")
+    checkpoints: Mapped[list["PatrolRoundCheckpoint"]] = relationship(
+        back_populates="round",
+        cascade="all, delete-orphan",
+        order_by="PatrolRoundCheckpoint.order_index",
+    )
 
 
 class Incident(Base):

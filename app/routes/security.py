@@ -12,9 +12,11 @@ from app.schemas.security import (
     Visitor,
     AccessPoint,
     AccessLog,
-    PatrolCheckpoint,
-    PatrolRound,
-    PatrolRoute,
+    PatrolRouteResponse,
+    PatrolRoundResponse,
+    StartPatrolRoundRequest,
+    CheckpointVisitRequest,
+    EntryLogResponse,
     Incident,
     SecurityLog,
     SecurityReport,
@@ -190,7 +192,7 @@ async def toggle_access_point(
         raise _service_error(exc) from exc
 
 
-@router.get("/patrol-rounds", response_model=list[PatrolRound])
+@router.get("/patrol-rounds", response_model=list[PatrolRoundResponse])
 async def get_patrol_rounds(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -199,7 +201,7 @@ async def get_patrol_rounds(
     return security_service.get_patrol_rounds(db, current_user.id)
 
 
-@router.get("/patrol-routes", response_model=list[PatrolRoute])
+@router.get("/patrol-routes", response_model=list[PatrolRouteResponse])
 async def get_patrol_routes(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -208,20 +210,20 @@ async def get_patrol_routes(
     return security_service.get_patrol_routes(db, current_user.id)
 
 
-@router.post("/patrol-rounds", response_model=PatrolRound)
+@router.post("/patrol-rounds", response_model=PatrolRoundResponse)
 async def start_patrol_round(
-    patrol_data: dict,
+    patrol_data: StartPatrolRoundRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
     try:
-        return security_service.start_patrol_round(db, current_user, patrol_data)
+        return security_service.start_patrol_round(db, current_user.id, patrol_data)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
 
-@router.patch("/patrol-rounds/{round_id}/complete", response_model=PatrolRound)
+@router.patch("/patrol-rounds/{round_id}/complete", response_model=PatrolRoundResponse)
 async def complete_patrol_round(
     round_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -234,17 +236,17 @@ async def complete_patrol_round(
         raise _service_error(exc) from exc
 
 
-@router.post("/patrol-rounds/{round_id}/checkpoints/{checkpoint_id}", response_model=PatrolRound)
+@router.post("/patrol-rounds/{round_id}/checkpoints/{checkpoint_id}", response_model=PatrolRoundResponse)
 async def check_checkpoint(
     round_id: UUID,
-    checkpoint_id: int,
-    data: dict,
+    checkpoint_id: UUID,
+    data: CheckpointVisitRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
     try:
-        return security_service.check_checkpoint(db, round_id, checkpoint_id, data, current_user.id)
+        return security_service.mark_checkpoint_visited(db, current_user.id, round_id, checkpoint_id, data)
     except ValueError as exc:
         raise _service_error(exc) from exc
 
@@ -285,13 +287,13 @@ async def update_incident_status(
         raise _service_error(exc) from exc
 
 
-@router.get("/logs", response_model=list[SecurityLog])
+@router.get("/logs", response_model=list[EntryLogResponse])
 async def get_security_logs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     _require_security(current_user)
-    return security_service.get_access_logs(db, current_user.id)
+    return security_service.get_entry_logs(db, current_user.id)
 
 
 @router.get("/reports", response_model=list[SecurityReport])

@@ -9,12 +9,16 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.admin import Announcement, Building, BuildingType, Unit, UnitStatus
 from app.models.resident import Event, MaintenanceRequest, MaintenanceStatus, Payment, PaymentStatus, ResidentProfile, Visitor
-from app.models.security import SecurityProfile, SecurityShift
+from app.models.security import PatrolRoute, SecurityProfile, SecurityShift
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
 from app.schemas.admin import (
     AnnouncementCreateRequest,
     AnnouncementResponse,
+    PatrolCheckpointCreate,
+    PatrolCheckpointResponse,
+    PatrolRouteCreateRequest,
+    PatrolRouteResponse,
     EventCreateRequest,
     EventResponse,
     AdminBuildingInfoResponse,
@@ -36,6 +40,42 @@ from app.services.email_service import send_resident_invite, send_security_invit
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_patrol_checkpoints(route_id: uuid.UUID, checkpoints: list[dict | PatrolCheckpointCreate]) -> list[PatrolCheckpointResponse]:
+    normalized: list[PatrolCheckpointResponse] = []
+    for checkpoint in checkpoints:
+        if isinstance(checkpoint, PatrolCheckpointCreate):
+            checkpoint_name = checkpoint.name
+            order_index = checkpoint.order_index
+        else:
+            checkpoint_name = str(checkpoint.get("name", "")).strip()
+            order_index = int(checkpoint.get("order_index", 0))
+        checkpoint_id = uuid.uuid5(uuid.NAMESPACE_URL, f"urban-nest:patrol-route:{route_id}:{order_index}:{checkpoint_name}")
+        normalized.append(
+            PatrolCheckpointResponse(
+                id=checkpoint_id,
+                name=checkpoint_name,
+                order_index=order_index,
+            )
+        )
+    normalized.sort(key=lambda checkpoint: checkpoint.order_index)
+    return normalized
+
+
+def _serialize_patrol_route(route: PatrolRoute) -> PatrolRouteResponse:
+    raw_checkpoints = route.checkpoints if isinstance(route.checkpoints, list) else []
+    checkpoints = _normalize_patrol_checkpoints(route.id, raw_checkpoints)
+    return PatrolRouteResponse(
+        id=route.id,
+        name=route.name,
+        description=route.description,
+        building_id=route.building_id,
+        is_active=route.is_active,
+        checkpoints=checkpoints,
+        created_at=route.created_at,
+        updated_at=route.updated_at,
+    )
 def require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
@@ -185,6 +225,47 @@ def get_admin_building_info(db: Session, building_id: uuid.UUID) -> AdminBuildin
         building_name=building.name,
         building_type=building.building_type,
     )
+
+
+def get_patrol_routes(db: Session, building_id: uuid.UUID) -> list[PatrolRouteResponse]:
+    routes = (
+        db.query(PatrolRoute)
+        .filter(PatrolRoute.building_id == building_id, PatrolRoute.is_active.is_(True))
+        .order_by(PatrolRoute.name.asc(), PatrolRoute.created_at.desc())
+        .all()
+    )
+    return [_serialize_patrol_route(route) for route in routes]
+
+
+def create_patrol_route(db: Session, building_id: uuid.UUID, payload: PatrolRouteCreateRequest) -> PatrolRouteResponse:
+    route = PatrolRoute(
+        name=payload.name,
+        description=payload.description,
+        building_id=building_id,
+        is_active=True,
+        checkpoints=[checkpoint.model_dump() for checkpoint in sorted(payload.checkpoints, key=lambda item: item.order_index)],
+    )
+    db.add(route)
+    db.commit()
+    db.refresh(route)
+    return _serialize_patrol_route(route)
+
+
+def delete_patrol_route(db: Session, building_id: uuid.UUID, route_id: str) -> dict:
+    try:
+        parsed_route_id = uuid.UUID(route_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid patrol route id") from exc
+
+    route = db.query(PatrolRoute).filter(PatrolRoute.id == parsed_route_id).first()
+    if not route:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patrol route not found")
+    if route.building_id != building_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This route does not belong to your building")
+
+    route.is_active = False
+    db.commit()
+    return {"message": "Route deleted"}
 
 
 def list_units_for_building(db: Session, building_id: uuid.UUID) -> list[UnitResponse]:

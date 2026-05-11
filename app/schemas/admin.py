@@ -39,6 +39,9 @@ class InviteManagedUserRequest(BaseModel):
     phone_number: str | None = Field(default=None, max_length=30)
     profile_image: str | None = None
     shift: SecurityShift | None = None
+    shift_start_time: str | None = Field(default=None, max_length=5)
+    shift_end_time: str | None = Field(default=None, max_length=5)
+    assigned_gate: str | None = Field(default=None, max_length=150)
     unit_id: str | None = None
     move_in_date: date | None = None
     lease_end_date: date | None = None
@@ -72,6 +75,9 @@ class CreateManagedUserRequest(BaseModel):
     password: str = Field(min_length=8)
     profile_image: str | None = None
     shift: SecurityShift | None = None
+    shift_start_time: str | None = Field(default=None, max_length=5)
+    shift_end_time: str | None = Field(default=None, max_length=5)
+    assigned_gate: str | None = Field(default=None, max_length=150)
     unit_id: str | None = None
     move_in_date: date | None = None
     lease_end_date: date | None = None
@@ -84,6 +90,9 @@ class UpdateManagedUserRequest(BaseModel):
     profile_image: str | None = None
     password: str | None = Field(default=None, min_length=8)
     shift: SecurityShift | None = None
+    shift_start_time: str | None = Field(default=None, max_length=5)
+    shift_end_time: str | None = Field(default=None, max_length=5)
+    assigned_gate: str | None = Field(default=None, max_length=150)
 
 
 class UnitResponse(BaseModel):
@@ -174,6 +183,38 @@ class EventResponse(BaseModel):
     building_id: UUID | None
     created_by: UUID
     is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class PatrolCheckpointCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    order_index: int = Field(ge=1)
+
+
+class PatrolRouteCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=5000)
+    checkpoints: list[PatrolCheckpointCreate] = Field(min_length=1)
+
+
+class PatrolCheckpointResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    order_index: int
+
+
+class PatrolRouteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    description: str | None
+    building_id: UUID
+    is_active: bool
+    checkpoints: list[PatrolCheckpointResponse]
     created_at: datetime
     updated_at: datetime
 
