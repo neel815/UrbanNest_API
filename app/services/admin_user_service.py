@@ -1,7 +1,7 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 import secrets
-import logging
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.admin import Announcement, Building, BuildingType, Unit, UnitStatus
 from app.models.resident import Event, MaintenanceRequest, MaintenanceStatus, Payment, PaymentStatus, ResidentProfile, Visitor
+from app.models.notification import NotificationType
 from app.models.security import PatrolRoute, SecurityProfile, SecurityShift
 from app.models.user import User, UserRole
 from app.models.admin import AdminProfile
@@ -37,9 +38,25 @@ from app.schemas.admin import (
 from app.schemas.resident import MaintenanceRequestResponse
 from app.utils.security import hash_password
 from app.services.email_service import send_resident_invite, send_security_invite
+from app.services.notification_service import create_notification
 
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_create_notification(
+    db: Session,
+    user_id: uuid.UUID,
+    title: str,
+    message: str,
+    type: NotificationType,
+    related_id: uuid.UUID | None = None,
+    related_type: str | None = None,
+) -> None:
+    try:
+        create_notification(db, user_id, title, message, type, related_id=related_id, related_type=related_type)
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
 
 
 def _normalize_patrol_checkpoints(route_id: uuid.UUID, checkpoints: list[dict | PatrolCheckpointCreate]) -> list[PatrolCheckpointResponse]:
@@ -868,6 +885,25 @@ def create_announcement(
     db.add(announcement)
     db.commit()
     db.refresh(announcement)
+    try:
+        residents = (
+            db.query(ResidentProfile)
+            .join(Unit, Unit.id == ResidentProfile.unit_id)
+            .filter(Unit.building_id == building_id)
+            .all()
+        )
+        for resident in residents:
+            _safe_create_notification(
+                db,
+                user_id=resident.user_id,
+                title="New Announcement",
+                message=announcement.title,
+                type=NotificationType.ANNOUNCEMENT,
+                related_id=announcement.id,
+                related_type="announcement",
+            )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return _serialize_announcement(announcement)
 
 
@@ -943,6 +979,21 @@ def update_maintenance_status(
     record.updated_by = admin_user_id
     db.commit()
     db.refresh(record)
+    try:
+        message = f"Your request '{record.title}' is now {new_status.value}"
+        if new_status == MaintenanceStatus.RESOLVED and record.resolution_note:
+            message = f"Your request '{record.title}' has been resolved. Note: {record.resolution_note}"
+        _safe_create_notification(
+            db,
+            user_id=record.resident_id,
+            title="Maintenance Request Updated",
+            message=message,
+            type=NotificationType.MAINTENANCE_UPDATE,
+            related_id=record.id,
+            related_type="maintenance",
+        )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return _serialize_maintenance_request(record)
 
 
@@ -1033,6 +1084,18 @@ def mark_payment_paid(
 
     db.commit()
     db.refresh(payment)
+    try:
+        _safe_create_notification(
+            db,
+            user_id=payment.resident_id,
+            title="Payment Marked as Received",
+            message=f"Your {payment.type.value} payment of ₹{payment.amount} has been confirmed by admin",
+            type=NotificationType.PAYMENT_UPDATE,
+            related_id=payment.id,
+            related_type="payment",
+        )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return PaymentResponse.model_validate(payment)
 
 
@@ -1108,6 +1171,7 @@ def raise_bulk_due(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No residents found in this building")
     
     created_count = 0
+    created_payments: list[Payment] = []
     for resident_profile, _ in residents:
         payment = Payment(
             id=uuid.uuid4(),
@@ -1122,9 +1186,23 @@ def raise_bulk_due(
             updated_at=datetime.now(timezone.utc),
         )
         db.add(payment)
+        created_payments.append(payment)
         created_count += 1
     
     db.commit()
+    try:
+        for payment in created_payments:
+            _safe_create_notification(
+                db,
+                user_id=payment.resident_id,
+                title="New Payment Due",
+                message=f"New {payment.type.value} due of ₹{payment.amount} by {payment.due_date}",
+                type=NotificationType.PAYMENT_DUE,
+                related_id=payment.id,
+                related_type="payment",
+            )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return {"message": f"Due raised for {created_count} residents"}
 
 
@@ -1186,6 +1264,18 @@ def raise_individual_due(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    try:
+        _safe_create_notification(
+            db,
+            user_id=resident_uuid,
+            title="New Payment Due",
+            message=f"New {payment.type.value} due of ₹{payment.amount} by {payment.due_date}",
+            type=NotificationType.PAYMENT_DUE,
+            related_id=payment.id,
+            related_type="payment",
+        )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     
     from app.schemas.resident import PaymentResponse
     return PaymentResponse.model_validate(payment)

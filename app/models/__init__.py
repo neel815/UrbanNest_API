@@ -23,6 +23,7 @@ from app.models.resident import (
 	Visitor,
 	VisitorStatus,
 )
+from app.models.notification import Notification, NotificationType
 from app.models.security import (
 	SecurityProfile,
 	SecurityShift,
@@ -76,6 +77,8 @@ __all__ = [
 	"MaintenanceStatus",
 	"Visitor",
 	"VisitorStatus",
+	"Notification",
+	"NotificationType",
 	"Payment",
 	"PaymentType",
 	"PaymentStatus",

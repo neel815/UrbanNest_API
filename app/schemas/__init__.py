@@ -39,6 +39,7 @@ from app.schemas.admin import (
     UnitUpdateRequest,
     UpdateManagedUserRequest,
 )
+from app.schemas.notification import NotificationListResponse, NotificationResponse
 from app.schemas.resident import (
     AnnouncementResponse,
     DashboardStats as ResidentDashboardStats,
@@ -117,6 +118,8 @@ __all__ = [
     "ResidentProfileUpdateRequest",
     "ResidentProfileResponse",
     "MaintenanceRequestResponse",
+    "NotificationResponse",
+    "NotificationListResponse",
     "SecurityProfileCreateRequest",
     "SecurityProfileUpdateRequest",
     "SecurityProfileResponse",

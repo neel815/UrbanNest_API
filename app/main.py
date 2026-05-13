@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import admin, auth, health, system_admin, resident, security
+from app.routes import admin, auth, health, notifications, resident, security, system_admin
 from app.config import settings
 from app.services.scheduler_service import mark_overdue_payments
 
@@ -35,6 +35,7 @@ app.include_router(system_admin.router, prefix="/api/system-admin", tags=["Syste
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(resident.router, prefix="/api/resident", tags=["Resident"])
 app.include_router(security.router, prefix="/api/security", tags=["Security"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 
 
 @app.on_event("startup")

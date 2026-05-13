@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import date, datetime, time, timezone
 import uuid
 from uuid import UUID
@@ -27,6 +28,7 @@ from app.models import (
 )
 from app.models.user import User, UserRole
 from app.models.security import SecurityProfile
+from app.models.notification import NotificationType
 from app.schemas.resident import AnnouncementResponse
 from app.schemas.security import (
     CheckpointVisitRequest,
@@ -37,6 +39,25 @@ from app.schemas.security import (
     PatrolRoundResponse,
     StartPatrolRoundRequest,
 )
+from app.services.notification_service import create_notification
+
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_create_notification(
+    db: Session,
+    user_id: UUID,
+    title: str,
+    message: str,
+    type: NotificationType,
+    related_id: UUID | None = None,
+    related_type: str | None = None,
+) -> None:
+    try:
+        create_notification(db, user_id, title, message, type, related_id=related_id, related_type=related_type)
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
 
 
 def _uuid(value: str | UUID | None) -> UUID | None:
@@ -499,6 +520,18 @@ def approve_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) ->
     visitor.approved_by = _uuid(user_id)
     db.commit()
     db.refresh(visitor)
+    try:
+        _safe_create_notification(
+            db,
+            user_id=visitor.resident_id,
+            title="Visitor Approved",
+            message=f"Your visitor {visitor.visitor_name} has been approved",
+            type=NotificationType.VISITOR_UPDATE,
+            related_id=visitor.id,
+            related_type="visitor",
+        )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return visitor
 
 
@@ -511,6 +544,18 @@ def deny_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) -> Vi
     visitor.approved_by = _uuid(user_id)
     db.commit()
     db.refresh(visitor)
+    try:
+        _safe_create_notification(
+            db,
+            user_id=visitor.resident_id,
+            title="Visitor Denied",
+            message=f"Your visitor {visitor.visitor_name} was denied entry",
+            type=NotificationType.VISITOR_UPDATE,
+            related_id=visitor.id,
+            related_type="visitor",
+        )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return visitor
 
 
@@ -523,6 +568,18 @@ def checkin_visitor(db: Session, visitor_id: str | UUID, user_id: str | UUID) ->
     visitor.check_in_time = datetime.utcnow()
     db.commit()
     db.refresh(visitor)
+    try:
+        _safe_create_notification(
+            db,
+            user_id=visitor.resident_id,
+            title="Visitor Checked In",
+            message=f"{visitor.visitor_name} has arrived and checked in",
+            type=NotificationType.VISITOR_UPDATE,
+            related_id=visitor.id,
+            related_type="visitor",
+        )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return visitor
 
 

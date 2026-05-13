@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, time, timezone
 from uuid import UUID
 
@@ -19,6 +20,8 @@ from app.models.resident import (
     Visitor,
     VisitorStatus,
 )
+from app.models.notification import NotificationType
+from app.models.security import SecurityProfile
 from app.models.user import User, UserRole
 from app.schemas.resident import (
     AnnouncementResponse,
@@ -36,6 +39,10 @@ from app.schemas.resident import (
     VisitorResponse,
     VisitorUpdateRequest,
 )
+from app.services.notification_service import create_notification
+
+
+logger = logging.getLogger(__name__)
 
 
 def require_resident(user: User) -> None:
@@ -121,6 +128,21 @@ def _to_resident_profile_response(user: User, profile: ResidentProfile | None) -
         created_at=profile.created_at if profile else user.created_at,
         updated_at=profile.updated_at if profile else user.updated_at,
     )
+
+
+def _safe_create_notification(
+    db: Session,
+    user_id: UUID,
+    title: str,
+    message: str,
+    type: NotificationType,
+    related_id: UUID | None = None,
+    related_type: str | None = None,
+) -> None:
+    try:
+        create_notification(db, user_id, title, message, type, related_id=related_id, related_type=related_type)
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
 
 
 def get_resident_profile(db: Session, user_id: UUID | str) -> ResidentProfileResponse:
@@ -237,6 +259,21 @@ def create_maintenance_request(db: Session, user_id: UUID | str, data: Maintenan
     db.add(record)
     db.commit()
     db.refresh(record)
+    try:
+        if profile.unit and profile.unit.building_id is not None:
+            admin_profile = db.query(AdminProfile).filter(AdminProfile.building_id == profile.unit.building_id).first()
+            if admin_profile is not None:
+                _safe_create_notification(
+                    db,
+                    user_id=admin_profile.user_id,
+                    title="New Maintenance Request",
+                    message=f"{profile.user.full_name} raised a maintenance request: {record.title}",
+                    type=NotificationType.NEW_MAINTENANCE,
+                    related_id=record.id,
+                    related_type="maintenance",
+                )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return _to_maintenance_response(record)
 
 
@@ -271,6 +308,7 @@ def get_visitors(db: Session, user_id: UUID | str) -> list[VisitorResponse]:
 
 def create_visitor(db: Session, user_id: UUID | str, data: VisitorCreateRequest) -> VisitorResponse:
     parsed_user_id = UUID(str(user_id))
+    profile = _get_resident_profile_entity(db, parsed_user_id)
     record = Visitor(
         visitor_name=data.visitor_name,
         visitor_phone=data.visitor_phone,
@@ -284,6 +322,21 @@ def create_visitor(db: Session, user_id: UUID | str, data: VisitorCreateRequest)
     db.commit()
     db.refresh(record)
     setattr(record, "vehicle_number", data.vehicle_number)
+    try:
+        if profile.unit and profile.unit.building_id is not None:
+            guards = db.query(SecurityProfile).filter(SecurityProfile.assigned_building_id == profile.unit.building_id).all()
+            for guard in guards:
+                _safe_create_notification(
+                    db,
+                    user_id=guard.user_id,
+                    title="New Visitor Registered",
+                    message=f"{record.visitor_name} expected at {record.expected_date} for {profile.user.full_name}",
+                    type=NotificationType.NEW_VISITOR,
+                    related_id=record.id,
+                    related_type="visitor",
+                )
+    except Exception as exc:
+        logger.error(f"Notification failed: {exc}")
     return _to_visitor_response(record)
 
 

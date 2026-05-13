@@ -89,5 +89,10 @@ class User(Base):
         back_populates="updated_by_user",
         foreign_keys="MaintenanceRequest.updated_by",
     )
+    notifications = relationship(
+        "Notification",
+        back_populates="user",
+        foreign_keys="Notification.user_id",
+    )
     created_events = relationship("Event", back_populates="creator", foreign_keys="Event.created_by")
     forum_posts = relationship("ForumPost", back_populates="author", foreign_keys="ForumPost.author_id")
