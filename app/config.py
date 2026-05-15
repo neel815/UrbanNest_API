@@ -1,5 +1,6 @@
+from urllib.parse import quote_plus
+
 from pydantic_settings import BaseSettings
-from typing import Optional
 
 class Settings(BaseSettings):
     # Environment
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "root@123"
     DB_NAME: str = "urbannest_db"
+    DATABASE_URL: str | None = None
     
     # API
     API_HOST: str = "0.0.0.0"
@@ -39,8 +41,14 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     
     @property
-    def DATABASE_URL(self) -> str:
-        return f"postgresql://postgres:root%40123@127.0.0.1:5432/urbannest_db"
+    def database_url(self) -> str:
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+
+        return (
+            f"postgresql://{self.DB_USER}:{quote_plus(self.DB_PASSWORD)}"
+            f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        )
     
     class Config:
         env_file = ".env"
